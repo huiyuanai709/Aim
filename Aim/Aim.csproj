@@ -1,0 +1,33 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <PackAsTool>true</PackAsTool>
+        <PublishAot>true</PublishAot>
+        <PublishTrimmed>true</PublishTrimmed>
+        <PackageId>huiyuanai709.aim</PackageId>
+        <Authors>huiyuanai709</Authors>
+        <RepositoryType>git</RepositoryType>
+        <RepositoryUrl>https://github.com/huiyuanai709/Aim</RepositoryUrl>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <Description>AIM: Git Intelligence Message - Automatically generate commit messages using AI</Description>
+        <PackageTags>AI GitCommit git Tools</PackageTags>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageOutputPath>./nupkg</PackageOutputPath>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
+      <PackageReference Include="Microsoft.Extensions.Configuration.Ini" Version="10.0.0" />
+      <PackageReference Include="OpenAI" Version="2.7.0" />
+      <PackageReference Include="System.CommandLine" Version="2.0.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <NONE Include="..\README.md" Pack="true" PackagePath="\" />
+    </ItemGroup>
+
+</Project>
