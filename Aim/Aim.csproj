@@ -17,6 +17,7 @@
         <PackageTags>AI GitCommit git Tools</PackageTags>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <PackageOutputPath>./nupkg</PackageOutputPath>
+        <Version>1.0.2</Version>
     </PropertyGroup>
 
     <ItemGroup>

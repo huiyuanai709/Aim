@@ -82,7 +82,7 @@ Rules:
 - Keep it under {config.MaxSubjectLength} characters for the subject line.
 - Use imperative mood (e.g., 'Fix bug' not 'Fixed bug').
 - Reference issues if mentioned in diff.
-- Structure: Subject line\n\nBody if needed.
+- Structure: Subject line Body if needed.
 
 Git diff:
 {diff}
