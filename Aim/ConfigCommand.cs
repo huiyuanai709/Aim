@@ -15,9 +15,10 @@ public class ConfigCommand : Command
         {
             Description = "Show current configuration"
         };
-        Option<string?> setOption = new("--set")
+        Option<string[]> setOption = new("--set")
         {
-            Description = "Set a configuration value (format: key=value)"
+            Description = "Set configuration values (format: key=value, repeatable)",
+            AllowMultipleArgumentsPerToken = true
         };
         Option<bool> resetOption = new("--reset")
         {
@@ -30,7 +31,7 @@ public class ConfigCommand : Command
         
         SetAction(parseResult =>
         {
-            var set = parseResult.GetValue(setOption);
+            var sets = parseResult.GetValue(setOption);
             var reset = parseResult.GetValue(resetOption);
 
             if (reset)
@@ -41,54 +42,71 @@ public class ConfigCommand : Command
                 return 0;
             }
 
-            if (set != null)
+            if (sets is { Length: > 0 })
             {
-                var parts = set.Split('=', 2);
-                if (parts.Length != 2)
-                {
-                    Console.Error.WriteLine("Error: Invalid format. Use: --set key=value");
-                    return 1;
-                }
-
                 var config = ConfigManager.LoadConfig();
-                var key = parts[0].Trim();
-                var value = parts[1].Trim();
 
-                switch (key.ToLower())
+                foreach (var set in sets)
                 {
-                    case "apikey":
-                        config.ApiKey = value;
-                        break;
-                    case "apiendpoint":
-                        config.ApiEndpoint = value;
-                        break;
-                    case "model":
-                        config.Model = value;
-                        break;
-                    case "autocommit":
-                        config.AutoCommit = bool.Parse(value);
-                        break;
-                    case "maxsubjectlength":
-                        config.MaxSubjectLength = int.Parse(value);
-                        break;
-                    case "diffnameonly":
-                        config.DiffNameOnly = bool.Parse(value);
-                        break;
-                    case "maxdiffchars":
-                        config.MaxDiffChars = int.Parse(value);
-                        break;
-                    default:
-                        Console.Error.WriteLine($"Error: Unknown configuration key: {key}");
+                    var parts = set.Split('=', 2);
+                    if (parts.Length != 2)
+                    {
+                        Console.Error.WriteLine($"Error: Invalid format '{set}'. Use: key=value");
                         return 1;
+                    }
+
+                    var key = parts[0].Trim();
+                    var value = parts[1].Trim();
+
+                    if (!TryApplyConfigValue(config, key, value, out var error))
+                    {
+                        Console.Error.WriteLine(error);
+                        return 1;
+                    }
+
+                    Console.WriteLine($"✓ Set {key} = {value}");
                 }
 
                 ConfigManager.SaveConfig(config);
-                Console.WriteLine($"✓ Set {key} = {value}");
                 return 0;
             }
 
             ConfigManager.ShowConfig();
             return 0;
         });
+    }
+
+    private static bool TryApplyConfigValue(ConfigManager.Config config, string key, string value, out string error)
+    {
+        switch (key.ToLower())
+        {
+            case "apikey":
+                config.ApiKey = value;
+                break;
+            case "apiendpoint":
+                config.ApiEndpoint = value;
+                break;
+            case "model":
+                config.Model = value;
+                break;
+            case "autocommit":
+                config.AutoCommit = bool.Parse(value);
+                break;
+            case "maxsubjectlength":
+                config.MaxSubjectLength = int.Parse(value);
+                break;
+            case "diffnameonly":
+                config.DiffNameOnly = bool.Parse(value);
+                break;
+            case "maxdiffchars":
+                config.MaxDiffChars = int.Parse(value);
+                break;
+            default:
+                error = $"Error: Unknown configuration key: {key}";
+                return false;
+        }
+
+        error = string.Empty;
+        return true;
     }
 }

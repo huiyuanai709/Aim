@@ -115,6 +115,12 @@ aim config --show
 # Set API key
 aim config --set apikey=sk-...
 
+# Set multiple values at once
+aim config --set apikey=sk-... model=gpt-4o maxdiffchars=80000
+
+# Or repeat --set
+aim config --set apikey=sk-... --set model=gpt-4o --set autocommit=true
+
 # Enable auto-commit
 aim config --set autocommit=true
 
