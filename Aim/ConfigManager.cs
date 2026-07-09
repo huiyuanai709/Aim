@@ -20,6 +20,7 @@ public class ConfigManager
         public bool AutoPush { get; set; } = false;
         public int MaxSubjectLength { get; set; } = 72;
         public bool DiffNameOnly { get; set; } = false;
+        public int MaxDiffChars { get; set; } = 80000;
     }
 
     public static Config LoadConfig()
@@ -70,6 +71,7 @@ public class ConfigManager
             sb.AppendLine("[Rules]");
             sb.AppendLine($"MaxSubjectLength = {config.MaxSubjectLength}");
             sb.AppendLine($"DiffNameOnly = {config.DiffNameOnly}");
+            sb.AppendLine($"MaxDiffChars = {config.MaxDiffChars}");
             sb.AppendLine();
 
             File.WriteAllText(ConfigPath, sb.ToString(), Encoding.UTF8);
@@ -94,6 +96,7 @@ public class ConfigManager
         Console.WriteLine($"  AutoPush:          {config.AutoPush}");
         Console.WriteLine($"  MaxSubjectLength:  {config.MaxSubjectLength}");
         Console.WriteLine($"  DiffNameOnly:      {config.DiffNameOnly}");
+        Console.WriteLine($"  MaxDiffChars:      {(config.MaxDiffChars <= 0 ? "(unlimited, no fallback)" : config.MaxDiffChars)}");
         Console.WriteLine(new string('-', 60));
     }
 }

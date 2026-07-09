@@ -105,6 +105,7 @@ Manage configuration settings.
 | `autocommit` | Auto-commit after generation | `false`                     |
 | `maxsubjectlength` | Max characters in subject line | `72`                        |
 | `diffnameonly` | Show only file names in diff | `false`                     |
+| `maxdiffchars` | Max diff size before auto fallback to file names only (`0` = no limit) | `80000` |
 
 **Examples:**
 ```bash
@@ -144,6 +145,7 @@ AutoPush = false
 [Rules]
 MaxSubjectLength = 72
 DiffNameOnly = false
+MaxDiffChars = 80000
 ```
 
 ## 🎯 Commit Message Rules

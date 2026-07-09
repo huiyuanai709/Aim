@@ -74,6 +74,9 @@ public class ConfigCommand : Command
                     case "diffnameonly":
                         config.DiffNameOnly = bool.Parse(value);
                         break;
+                    case "maxdiffchars":
+                        config.MaxDiffChars = int.Parse(value);
+                        break;
                     default:
                         Console.Error.WriteLine($"Error: Unknown configuration key: {key}");
                         return 1;

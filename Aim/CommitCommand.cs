@@ -45,28 +45,12 @@ public class CommitCommand : Command
             var isAmend = parseResult.GetValue(amendOption) == true;
             var model = config.Model;
             var autoCommit = config.AutoCommit;
-            var diffNameOnly = config.DiffNameOnly;
 
-            var gitArgs = "diff --cached";
-
-            if (diffNameOnly)
-            {
-                gitArgs += " --name-only";
-            }
-
-
-            var (success, diff, error) = GitExecutor.RunGitCommand(gitArgs);
-
-            if (isAmend)
-            {
-                gitArgs = "show --pretty=format:";
-                gitArgs += config.DiffNameOnly ? " --name-only" : "";
-                diff += GitExecutor.RunGitCommand(gitArgs).output;
-            }
+            var (success, diff, error) = GetDiff(isAmend, config.DiffNameOnly);
 
             if (!success)
             {
-                Console.Error.WriteLine($"Error running git {gitArgs}: {error}");
+                Console.Error.WriteLine($"Error running git diff: {error}");
                 return 1;
             }
 
@@ -76,6 +60,26 @@ public class CommitCommand : Command
                 return 1;
             }
 
+            var usedNameOnlyFallback = false;
+            if (!config.DiffNameOnly && config.MaxDiffChars > 0 && diff.Length > config.MaxDiffChars)
+            {
+                Console.Error.WriteLine(
+                    $"Warning: Diff ({diff.Length} chars) exceeds maxdiffchars ({config.MaxDiffChars}). " +
+                    "Falling back to file names only.");
+                (success, diff, error) = GetDiff(isAmend, nameOnly: true);
+                usedNameOnlyFallback = true;
+
+                if (!success)
+                {
+                    Console.Error.WriteLine($"Error running git diff: {error}");
+                    return 1;
+                }
+            }
+
+            var diffLabel = usedNameOnlyFallback || config.DiffNameOnly
+                ? "Changed files (name only)"
+                : "Git diff";
+
             var prompt =
                 $@"You are a helpful assistant that generates concise, semantic commit messages based on Git diff.
 Rules:
@@ -83,8 +87,9 @@ Rules:
 - Use imperative mood (e.g., 'Fix bug' not 'Fixed bug').
 - Reference issues if mentioned in diff.
 - Structure: Subject line Body if needed.
+{(usedNameOnlyFallback ? "- Only file names are available; infer the commit scope from paths." : "")}
 
-Git diff:
+{diffLabel}:
 {diff}
 
 Generate only the commit message, nothing else.";
@@ -147,5 +152,31 @@ Generate only the commit message, nothing else.";
 
             return 0;
         });
+    }
+
+    private static (bool success, string output, string error) GetDiff(bool isAmend, bool nameOnly)
+    {
+        var gitArgs = "diff --cached";
+        if (nameOnly)
+            gitArgs += " --name-only";
+
+        var (success, diff, error) = GitExecutor.RunGitCommand(gitArgs);
+
+        if (isAmend)
+        {
+            gitArgs = "show --pretty=format:";
+            if (nameOnly)
+                gitArgs += " --name-only";
+
+            var (amendSuccess, amendOutput, amendError) = GitExecutor.RunGitCommand(gitArgs);
+            diff += amendOutput;
+            if (!amendSuccess)
+            {
+                success = false;
+                error = amendError;
+            }
+        }
+
+        return (success, diff, error);
     }
 }
