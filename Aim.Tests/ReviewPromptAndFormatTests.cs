@@ -61,6 +61,12 @@ public class ReviewPromptAndFormatTests
         var nameOnly = ReviewPrompt.AgentInstructions(nameOnly: true);
         Assert.Contains("file_read", nameOnly);
         Assert.Contains("file names only", nameOnly);
+        Assert.DoesNotContain("load_skill", nameOnly);
+
+        var withSkills = ReviewPrompt.AgentInstructions(nameOnly: false, skills: true);
+        Assert.Contains("load_skill", withSkills);
+        Assert.Contains("read_skill_resource", withSkills);
+        Assert.Contains("Skill scripts are not run", withSkills);
     }
 
     [Fact]

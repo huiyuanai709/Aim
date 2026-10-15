@@ -26,6 +26,7 @@ public class ConfigManager
         public int MaxReviewComments { get; set; } = 20;
         public int MaxReviewRounds { get; set; } = 10;
         public int MaxToolResultChars { get; set; } = 12000;
+        public string SkillsPaths { get; set; } = "";
     }
 
     public static Config LoadConfig() => LoadFromFile(ConfigPath);
@@ -80,6 +81,7 @@ public class ConfigManager
         sb.AppendLine($"MaxReviewComments = {config.MaxReviewComments}");
         sb.AppendLine($"MaxReviewRounds = {config.MaxReviewRounds}");
         sb.AppendLine($"MaxToolResultChars = {config.MaxToolResultChars}");
+        sb.AppendLine($"SkillsPaths = {config.SkillsPaths}");
         sb.AppendLine();
 
         return sb.ToString();
@@ -166,6 +168,15 @@ public class ConfigManager
 
                 config.MaxToolResultChars = maxToolChars;
                 break;
+            case "skillspaths":
+                if (value.Contains('\n') || value.Contains('\r') || value.Contains('\0'))
+                {
+                    error = "Error: skillspaths must be a single line of semicolon-separated paths.";
+                    return false;
+                }
+
+                config.SkillsPaths = value.Trim();
+                break;
             default:
                 error = $"Error: Unknown configuration key: {key}";
                 return false;
@@ -193,6 +204,7 @@ public class ConfigManager
         Console.WriteLine($"  MaxReviewComments: {config.MaxReviewComments}");
         Console.WriteLine($"  MaxReviewRounds:   {config.MaxReviewRounds}");
         Console.WriteLine($"  MaxToolResultChars: {config.MaxToolResultChars}");
+        Console.WriteLine($"  SkillsPaths:       {(string.IsNullOrWhiteSpace(config.SkillsPaths) ? "(not set)" : config.SkillsPaths)}");
         Console.WriteLine(new string('-', 60));
     }
 }

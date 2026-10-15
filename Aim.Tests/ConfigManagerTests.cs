@@ -20,7 +20,8 @@ public class ConfigManagerTests
             ReviewModel = "gpt-review",
             MaxReviewComments = 7,
             MaxReviewRounds = 6,
-            MaxToolResultChars = 4000
+            MaxToolResultChars = 4000,
+            SkillsPaths = "/opt/team-skills;../shared"
         };
 
         var path = Path.Combine(Path.GetTempPath(), "aim-config-" + Guid.NewGuid().ToString("n") + ".ini");
@@ -40,6 +41,7 @@ public class ConfigManagerTests
             Assert.Equal(7, loaded.MaxReviewComments);
             Assert.Equal(6, loaded.MaxReviewRounds);
             Assert.Equal(4000, loaded.MaxToolResultChars);
+            Assert.Equal("/opt/team-skills;../shared", loaded.SkillsPaths);
         }
         finally
         {
@@ -60,6 +62,7 @@ public class ConfigManagerTests
             Assert.Equal(20, loaded.MaxReviewComments);
             Assert.Equal(10, loaded.MaxReviewRounds);
             Assert.Equal(12000, loaded.MaxToolResultChars);
+            Assert.Equal("", loaded.SkillsPaths);
         }
         finally
         {
@@ -100,5 +103,12 @@ public class ConfigManagerTests
         Assert.Equal(500, config.MaxToolResultChars);
         Assert.False(ConfigManager.TryApply(config, "maxtoolresultchars", "0", out error));
         Assert.Contains("1 to 200000", error);
+
+        Assert.True(ConfigManager.TryApply(config, "skillspaths", "/opt/skills; ../shared", out error), error);
+        Assert.Equal("/opt/skills; ../shared", config.SkillsPaths);
+        Assert.True(ConfigManager.TryApply(config, "skillspaths", "", out error), error);
+        Assert.Equal("", config.SkillsPaths);
+        Assert.False(ConfigManager.TryApply(config, "skillspaths", "a\nb", out error));
+        Assert.Contains("single line", error);
     }
 }

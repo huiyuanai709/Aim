@@ -265,6 +265,12 @@ public class ReviewCommand : Command
                             $"Warning: maxtoolresultchars must be from 1 to {ReviewAgentLimits.MaxToolChars}. Using {toolChars}.");
                     }
 
+                    var skills = ReviewSkillPaths.Resolve(Environment.CurrentDirectory, config.SkillsPaths);
+                    foreach (var note in skills.Notes)
+                        Console.Error.WriteLine(note);
+                    if (skills.Directories.Count > 0)
+                        Console.Error.WriteLine("Skills: " + string.Join(", ", skills.Labels));
+
                     Console.Error.WriteLine(
                         $"Reviewing {ReviewDiffLoader.Describe(target)} with {model} (agent, up to {maxRounds} rounds)...");
                     raw = await ReviewAgent.CompleteAsync(
@@ -278,7 +284,8 @@ public class ReviewCommand : Command
                             MaxToolChars = toolChars,
                             NameOnly = nameOnly,
                             Revision = ReviewAgentLimits.ToolRevision(target),
-                            Progress = Console.Error
+                            Progress = Console.Error,
+                            SkillDirectories = skills.Directories
                         },
                         prompt,
                         cancellationToken);

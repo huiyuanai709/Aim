@@ -99,11 +99,13 @@ internal static class ReviewPrompt
         return sb.ToString();
     }
 
-    public static string AgentInstructions(bool nameOnly)
+    public static string AgentInstructions(bool nameOnly, bool skills = false)
     {
         var sb = new StringBuilder();
         sb.AppendLine("You review a git diff for Aim. You may call file_read and code_search before you answer.");
         sb.AppendLine("file_read returns one repository file. code_search finds a fixed string with git grep. Neither tool submits a comment.");
+        if (skills)
+            sb.AppendLine("Advertised skills can be loaded with load_skill and their files read with read_skill_resource. Skill scripts are not run.");
         if (nameOnly)
             sb.AppendLine("The user message lists file names only. Use file_read to see contents, and stay focused on the files named in the diff.");
         sb.AppendLine("Your final message must be only the JSON array described in the user message. Do not wrap it in markdown. If nothing is worth reporting, return [].");

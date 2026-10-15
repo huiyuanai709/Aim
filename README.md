@@ -100,7 +100,7 @@ Review a diff and print AI line comments. The default input is staged changes (`
 - `--rule <file>`: extra rules text, appended to the built-in checklist.
 - `--background "..."`: extra product context for the model.
 - `--format text|json`: human-readable text (default) or a JSON array of comments.
-- `--agent`: opt in to a Microsoft Agent Framework review agent (`ChatClientAgent`) that may call `file_read` and `code_search` before the final answer. Off by default. The final answer is still the same JSON comment array.
+- `--agent`: opt in to a Microsoft Agent Framework review agent (`ChatClientAgent`) that may call `file_read` and `code_search`, and load file-based skills, before the final answer. Off by default. The final answer is still the same JSON comment array.
 - `--max-rounds <n>`: cap agent tool rounds (1–40). Overrides `maxreviewrounds`. Without `--agent`, a valid value is ignored after a note on stderr.
 
 Line numbers refer to the **new file** in the diff. Aim writes those numbers onto the diff before calling the model. It does not relocate comments afterward, so a line that does not match the file on disk is best-effort.
@@ -115,6 +115,37 @@ With `--agent`, the agent may call two tools before that JSON array:
 - `code_search` runs `git grep` for a fixed string (not a shell command and not a regular expression) and returns at most 80 lines.
 
 Tool progress is printed on stderr (`▶ file_read …`, `▶ code_search …`). Tool text is truncated to `maxtoolresultchars` (default 12000). Agent rounds default to `maxreviewrounds` (10).
+
+With `--agent`, Aim also registers a Microsoft Agent Framework `AgentSkillsProvider` when it finds skill directories. Discovery order is:
+
+1. Paths in the repository's `.aim/config.json` (`skills`, then `skillspaths`). Each value may be a string or an array of strings. A string is split on `;`. Relative paths are relative to the git repository root.
+2. `skillspaths` in Aim's user `config.ini`, also semicolon-separated.
+3. `<repo>/.aim/skills` and `<repo>/skills`, when those directories exist.
+
+Duplicate directories are skipped. The first skill name wins. A missing configured path is a warning on stderr; a missing default directory is ignored. Each directory is scanned for `SKILL.md` files (a skill folder directly under the directory).
+
+`load_skill` and `read_skill_resource` do not ask for approval. Skill scripts are filtered out of discovery and no script runner is registered. `run_skill_script` stays approval-gated, and Aim does not approve it, so a script is never launched. Treat skill files as trusted instructions.
+
+```text
+.aim/skills/explicit-errors/SKILL.md
+.aim/skills/explicit-errors/references/notes.txt
+skills/api-contracts/SKILL.md
+.aim/config.json
+```
+
+```json
+{
+  "skills": [".aim/skills", "../shared-skills"]
+}
+```
+
+```markdown
+---
+name: explicit-errors
+description: Flag swallowed exceptions in the diff.
+---
+Prefer an explicit error over an empty catch.
+```
 
 An empty diff prints a message and exits with code 1. A review that finds nothing to say exits 0.
 
@@ -163,6 +194,7 @@ Manage configuration settings.
 | `maxreviewcomments` | Maximum review comments to print | `20` |
 | `maxreviewrounds` | Maximum `--agent` tool rounds | `10` |
 | `maxtoolresultchars` | Maximum characters returned by one review tool | `12000` |
+| `skillspaths` | Extra `--agent` skill directories, separated by `;`. Relative paths use the repository root | _(empty)_ |
 
 **Examples:**
 ```bash
@@ -177,6 +209,9 @@ aim config --set apikey=sk-... model=gpt-4o maxdiffchars=80000
 
 # Use a separate model for review and cap the comment count
 aim config --set reviewmodel=gpt-4o maxreviewcomments=20 maxreviewrounds=10 maxtoolresultchars=12000
+
+# Add skill directories for aim review --agent
+aim config --set skillspaths=/opt/team-skills;../shared-skills
 
 # Or repeat --set
 aim config --set apikey=sk-... --set model=gpt-4o --set autocommit=true
@@ -218,6 +253,7 @@ ReviewModel =
 MaxReviewComments = 20
 MaxReviewRounds = 10
 MaxToolResultChars = 12000
+SkillsPaths =
 ```
 
 ## 🎯 Commit Message Rules
@@ -234,7 +270,7 @@ AIM generates commit messages following these conventions:
 
 - **.NET 10.0**: Latest .NET with native AOT compilation
 - **OpenAI SDK**: Official OpenAI .NET library (v2.14.0)
-- **Microsoft Agent Framework**: `ChatClientAgent` for the optional `aim review --agent` tool loop (v1.25.0). Microsoft.Extensions.AI is the chat client underneath that agent.
+- **Microsoft Agent Framework**: `ChatClientAgent` for the optional `aim review --agent` tool loop, and `AgentSkillsProvider` for `SKILL.md` skills (v1.25.0). Microsoft.Extensions.AI is the chat client underneath that agent.
 - **System.CommandLine**: Modern command-line parsing (v2.0.0)
 - **Microsoft.Extensions.Configuration**: Robust configuration management
 
