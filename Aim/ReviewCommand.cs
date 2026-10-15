@@ -269,7 +269,11 @@ public class ReviewCommand : Command
                     foreach (var note in skills.Notes)
                         Console.Error.WriteLine(note);
                     if (skills.Directories.Count > 0)
+                    {
                         Console.Error.WriteLine("Skills: " + string.Join(", ", skills.Labels));
+                        Console.Error.WriteLine(
+                            $"Note: Skill scripts (.py, .sh, .js, .cs, .csx) run as your user in the skill directory, with a {SkillScriptRunner.DefaultTimeout.TotalSeconds:0} second timeout. A shebang selects the interpreter. Only use skills you trust.");
+                    }
 
                     Console.Error.WriteLine(
                         $"Reviewing {ReviewDiffLoader.Describe(target)} with {model} (agent, up to {maxRounds} rounds)...");
