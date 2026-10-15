@@ -4,6 +4,8 @@
 
 AIM is a command-line tool that leverages AI to generate meaningful, semantic commit messages based on your Git changes. Say goodbye to generic "update files" commits and hello to clear, professional commit history.
 
+`aim review` uses the same OpenAI-compatible setup to comment on a diff: staged changes by default, or a commit range when you pass refs.
+
 ## ✨ Features
 
 - 🤖 **AI-Powered**: Uses OpenAI-compatible APIs to analyze your git diff and generate contextual commit messages
@@ -12,6 +14,7 @@ AIM is a command-line tool that leverages AI to generate meaningful, semantic co
 - ⚙️ **Configurable**: Customize model, endpoint, message length, and behavior
 - 🔄 **Auto-commit**: Optional automatic commit after message generation
 - 📝 **Amend Support**: Generate messages for amending previous commits
+- 🔍 **Diff review**: `aim review` prints line comments for staged changes, a triple-dot range, or one commit
 - 🎨 **Clean Output**: Beautiful, readable console output
 
 ## 🚀 Quick Start
@@ -86,6 +89,43 @@ aim commit --all
 aim commit --amend
 ```
 
+### `aim review`
+
+Review a diff and print AI line comments. The default input is staged changes (`git diff --cached`), the same set `aim commit` reads.
+
+**Options:**
+- `--from <ref>` / `--to <ref>`: review the triple-dot range. That is the changes on `--to` since it diverged from `--from`. The two flags must be passed together.
+- `--commit <rev>`: review the patch of one commit. Cannot be combined with `--from` / `--to`.
+- `--rule <file>`: extra rules text, appended to the built-in checklist.
+- `--background "..."`: extra product context for the model.
+- `--format text|json`: human-readable text (default) or a JSON array of comments.
+
+Line numbers refer to the **new file** in the diff. Aim writes those numbers onto the diff before calling the model. It does not relocate comments afterward, so a line that does not match the file on disk is best-effort.
+
+When the diff is longer than `maxdiffchars`, Aim warns and sends a prefix of the patch, keeping whole files when they fit. If the budget cannot hold a hunk, it falls back to file names (the same idea as `aim commit`). `diffnameonly=true` sends only file names.
+
+Each comment has `path`, `start_line`, `end_line`, `severity` (`critical`, `high`, `medium`, `low`), `category` (`bug`, `security`, `performance`, `maintainability`, `style`, `other`), `content`, and an optional `suggestion_code`. At most `maxreviewcomments` comments are printed (default 20). Set `reviewmodel` when review should use a different model than `model`.
+
+An empty diff prints a message and exits with code 1. A review that finds nothing to say exits 0.
+
+**Examples:**
+```bash
+# Review staged changes
+aim review
+
+# Review commits on feature since it diverged from main
+aim review --from main --to feature
+
+# Review one commit
+aim review --commit HEAD
+
+# JSON for scripts
+aim review --format json
+
+# Product context and a local rules file
+aim review --background "Payments service. Prefer explicit errors." --rule ./REVIEW.md
+```
+
 ### `aim config`
 
 Manage configuration settings.
@@ -105,7 +145,9 @@ Manage configuration settings.
 | `autocommit` | Auto-commit after generation | `false`                     |
 | `maxsubjectlength` | Max characters in subject line | `72`                        |
 | `diffnameonly` | Show only file names in diff | `false`                     |
-| `maxdiffchars` | Max diff size before auto fallback to file names only (`0` = no limit) | `80000` |
+| `maxdiffchars` | Max diff size before truncation or name-only fallback (`0` = no limit) | `80000` |
+| `reviewmodel` | Model for `aim review`. Empty uses `model` | _(empty)_ |
+| `maxreviewcomments` | Maximum review comments to print | `20` |
 
 **Examples:**
 ```bash
@@ -117,6 +159,9 @@ aim config --set apikey=sk-...
 
 # Set multiple values at once
 aim config --set apikey=sk-... model=gpt-4o maxdiffchars=80000
+
+# Use a separate model for review and cap the comment count
+aim config --set reviewmodel=gpt-4o maxreviewcomments=20
 
 # Or repeat --set
 aim config --set apikey=sk-... --set model=gpt-4o --set autocommit=true
@@ -152,6 +197,10 @@ AutoPush = false
 MaxSubjectLength = 72
 DiffNameOnly = false
 MaxDiffChars = 80000
+
+[Review]
+ReviewModel =
+MaxReviewComments = 20
 ```
 
 ## 🎯 Commit Message Rules
@@ -199,8 +248,8 @@ This project is open source. Please check the LICENSE file for details.
 
 ## 🐛 Troubleshooting
 
-### "No changes to commit"
-Make sure you've staged your changes with `git add` first, or use `aim commit --all`.
+### "No changes to commit" / "No staged changes to review"
+Make sure you've staged your changes with `git add` first, or use `aim commit --all`. For review, you can also pass `--from` and `--to`, or `--commit`.
 
 ### "API key is required"
 Set your API key with: `aim config --set apikey=YOUR_KEY`

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Microsoft.Extensions.Configuration;
 
@@ -21,25 +22,30 @@ public class ConfigManager
         public int MaxSubjectLength { get; set; } = 72;
         public bool DiffNameOnly { get; set; } = false;
         public int MaxDiffChars { get; set; } = 80000;
+        public string ReviewModel { get; set; } = "";
+        public int MaxReviewComments { get; set; } = 20;
     }
 
-    public static Config LoadConfig()
+    public static Config LoadConfig() => LoadFromFile(ConfigPath);
+
+    internal static Config LoadFromFile(string path)
     {
         var config = new Config();
 
-        if (!File.Exists(ConfigPath))
+        if (!File.Exists(path))
             return config;
 
         try
         {
             var builder = new ConfigurationBuilder()
-                .AddIniFile(ConfigPath, optional: true, reloadOnChange: false);
+                .AddIniFile(path, optional: true, reloadOnChange: false);
 
             var configuration = builder.Build();
 
             configuration.GetSection("General").Bind(config);
             configuration.GetSection("Behavior").Bind(config);
             configuration.GetSection("Rules").Bind(config);
+            configuration.GetSection("Review").Bind(config);
         }
         catch (Exception ex)
         {
@@ -47,6 +53,32 @@ public class ConfigManager
         }
 
         return config;
+    }
+
+    internal static string BuildIni(Config config)
+    {
+        var sb = new StringBuilder();
+
+        sb.AppendLine("[General]");
+        sb.AppendLine($"ApiKey = {config.ApiKey}");
+        sb.AppendLine($"ApiEndpoint = {config.ApiEndpoint}");
+        sb.AppendLine($"Model = {config.Model}");
+        sb.AppendLine();
+        sb.AppendLine("[Behavior]");
+        sb.AppendLine($"AutoCommit = {config.AutoCommit}".ToLower());
+        sb.AppendLine($"AutoPush = {config.AutoPush}".ToLower());
+        sb.AppendLine();
+        sb.AppendLine("[Rules]");
+        sb.AppendLine($"MaxSubjectLength = {config.MaxSubjectLength}");
+        sb.AppendLine($"DiffNameOnly = {config.DiffNameOnly}");
+        sb.AppendLine($"MaxDiffChars = {config.MaxDiffChars}");
+        sb.AppendLine();
+        sb.AppendLine("[Review]");
+        sb.AppendLine($"ReviewModel = {config.ReviewModel}");
+        sb.AppendLine($"MaxReviewComments = {config.MaxReviewComments}");
+        sb.AppendLine();
+
+        return sb.ToString();
     }
 
     public static void SaveConfig(Config config)
@@ -57,30 +89,66 @@ public class ConfigManager
             if (!Directory.Exists(dir))
                 Directory.CreateDirectory(dir);
 
-            var sb = new StringBuilder();
-
-            sb.AppendLine("[General]");
-            sb.AppendLine($"ApiKey = {config.ApiKey}");
-            sb.AppendLine($"ApiEndpoint = {config.ApiEndpoint}");
-            sb.AppendLine($"Model = {config.Model}");
-            sb.AppendLine();
-            sb.AppendLine("[Behavior]");
-            sb.AppendLine($"AutoCommit = {config.AutoCommit}".ToLower());
-            sb.AppendLine($"AutoPush = {config.AutoPush}".ToLower());
-            sb.AppendLine();
-            sb.AppendLine("[Rules]");
-            sb.AppendLine($"MaxSubjectLength = {config.MaxSubjectLength}");
-            sb.AppendLine($"DiffNameOnly = {config.DiffNameOnly}");
-            sb.AppendLine($"MaxDiffChars = {config.MaxDiffChars}");
-            sb.AppendLine();
-
-            File.WriteAllText(ConfigPath, sb.ToString(), Encoding.UTF8);
+            File.WriteAllText(ConfigPath, BuildIni(config), Encoding.UTF8);
             Console.WriteLine($"Configuration saved to: {ConfigPath}");
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Failed to save config: {ex.Message}");
         }
+    }
+
+    internal static bool TryApply(Config config, string key, string value, out string error)
+    {
+        switch (key.ToLowerInvariant())
+        {
+            case "apikey":
+                config.ApiKey = value;
+                break;
+            case "apiendpoint":
+                config.ApiEndpoint = value;
+                break;
+            case "model":
+                config.Model = value;
+                break;
+            case "autocommit":
+                config.AutoCommit = bool.Parse(value);
+                break;
+            case "maxsubjectlength":
+                config.MaxSubjectLength = int.Parse(value);
+                break;
+            case "diffnameonly":
+                config.DiffNameOnly = bool.Parse(value);
+                break;
+            case "maxdiffchars":
+                config.MaxDiffChars = int.Parse(value);
+                break;
+            case "reviewmodel":
+                if (value.Contains('\n') || value.Contains('\r'))
+                {
+                    error = "Error: reviewmodel must be a single line.";
+                    return false;
+                }
+
+                config.ReviewModel = value;
+                break;
+            case "maxreviewcomments":
+                if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxComments) ||
+                    maxComments < 1)
+                {
+                    error = $"Error: maxreviewcomments must be a positive integer, got '{value}'.";
+                    return false;
+                }
+
+                config.MaxReviewComments = maxComments;
+                break;
+            default:
+                error = $"Error: Unknown configuration key: {key}";
+                return false;
+        }
+
+        error = "";
+        return true;
     }
 
     public static void ShowConfig()
@@ -97,6 +165,8 @@ public class ConfigManager
         Console.WriteLine($"  MaxSubjectLength:  {config.MaxSubjectLength}");
         Console.WriteLine($"  DiffNameOnly:      {config.DiffNameOnly}");
         Console.WriteLine($"  MaxDiffChars:      {(config.MaxDiffChars <= 0 ? "(unlimited, no fallback)" : config.MaxDiffChars)}");
+        Console.WriteLine($"  ReviewModel:       {(string.IsNullOrWhiteSpace(config.ReviewModel) ? "(not set, uses model)" : config.ReviewModel)}");
+        Console.WriteLine($"  MaxReviewComments: {config.MaxReviewComments}");
         Console.WriteLine(new string('-', 60));
     }
 }

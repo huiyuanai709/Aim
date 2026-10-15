@@ -13,8 +13,8 @@
         <RepositoryType>git</RepositoryType>
         <RepositoryUrl>https://github.com/huiyuanai709/Aim</RepositoryUrl>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
-        <Description>AIM: Git Intelligence Message - Automatically generate commit messages using AI</Description>
-        <PackageTags>AI GitCommit git Tools</PackageTags>
+        <Description>AIM: AI commit messages and diff review for Git</Description>
+        <PackageTags>AI GitCommit git Tools Review</PackageTags>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <PackageOutputPath>./nupkg</PackageOutputPath>
         <Version>1.0.2</Version>
@@ -29,6 +29,10 @@
 
     <ItemGroup>
       <NONE Include="..\README.md" Pack="true" PackagePath="\" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <InternalsVisibleTo Include="Aim.Tests" />
     </ItemGroup>
 
 </Project>
