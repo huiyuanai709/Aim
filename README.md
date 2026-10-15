@@ -124,11 +124,14 @@ With `--agent`, Aim also registers a Microsoft Agent Framework `AgentSkillsProvi
 
 Duplicate directories are skipped. The first skill name wins. A missing configured path is a warning on stderr; a missing default directory is ignored. Each directory is scanned for `SKILL.md` files (a skill folder directly under the directory).
 
-`load_skill` and `read_skill_resource` do not ask for approval. Skill scripts are filtered out of discovery and no script runner is registered. `run_skill_script` stays approval-gated, and Aim does not approve it, so a script is never launched. Treat skill files as trusted instructions.
+`load_skill`, `read_skill_resource`, and `run_skill_script` do not ask for a second approval when `--agent` is on. Aim discovers `.py`, `.sh`, and `.js` scripts under the skill directory and runs them with `python3`, `/bin/sh`, or `node`. The script path is passed as an argument, not through a shell. The working directory is the skill directory. Microsoft Agent Framework rejects script paths that leave that directory, including symlink escapes, and Aim checks the path again before starting the process.
+
+This is not a container. A script runs as your user, inherits the environment, and can read files or use the network. Output is capped by `maxtoolresultchars`, and the process is stopped after 20 seconds. Only point `--agent` at skill directories you trust. Other script types, including `.ps1` and `.cs`, are not run.
 
 ```text
 .aim/skills/explicit-errors/SKILL.md
 .aim/skills/explicit-errors/references/notes.txt
+.aim/skills/explicit-errors/scripts/check.sh
 skills/api-contracts/SKILL.md
 .aim/config.json
 ```

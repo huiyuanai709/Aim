@@ -66,7 +66,7 @@ public class ReviewPromptAndFormatTests
         var withSkills = ReviewPrompt.AgentInstructions(nameOnly: false, skills: true);
         Assert.Contains("load_skill", withSkills);
         Assert.Contains("read_skill_resource", withSkills);
-        Assert.Contains("Skill scripts are not run", withSkills);
+        Assert.Contains("run_skill_script", withSkills);
     }
 
     [Fact]

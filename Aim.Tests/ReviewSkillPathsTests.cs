@@ -86,6 +86,7 @@ public class ReviewSkillPathsTests
         repo.Write(".aim/skills/explicit-errors/references/notes.txt", "detail");
         Directory.CreateDirectory(Path.Combine(repo.Path, ".aim", "skills", "explicit-errors", "scripts"));
         repo.Write(".aim/skills/explicit-errors/scripts/run.py", "print(1)\n");
+        repo.Write(".aim/skills/explicit-errors/scripts/skip.ps1", "Write-Output no\n");
         repo.Write("skills/explicit-errors/SKILL.md", Skill("explicit-errors", "Second copy."));
         repo.Write("skills/api-contracts/SKILL.md", Skill("api-contracts", "Contracts."));
 
@@ -118,20 +119,20 @@ public class ReviewSkillPathsTests
             Assert.Contains(AgentSkillsProvider.LoadSkillToolName, toolNames);
             Assert.Contains(AgentSkillsProvider.ReadSkillResourceToolName, toolNames);
             Assert.Contains(AgentSkillsProvider.RunSkillScriptToolName, toolNames);
-            Assert.DoesNotContain(
-                context.Tools!,
-                tool => tool.Name == AgentSkillsProvider.LoadSkillToolName && tool is ApprovalRequiredAIFunction);
-            Assert.Contains(
-                context.Tools!,
-                tool => tool.Name == AgentSkillsProvider.RunSkillScriptToolName && tool is ApprovalRequiredAIFunction);
+            Assert.DoesNotContain(context.Tools!, tool => tool is ApprovalRequiredAIFunction);
+            Assert.Contains("run_skill_script", context.Instructions);
 
             using var source = new AgentFileSkillsSource(
                 found.Directories,
-                scriptRunner: null,
-                new AgentFileSkillsSourceOptions { ScriptFilter = static _ => false });
+                new SkillScriptRunner(TextWriter.Null, 4000).RunAsync,
+                new AgentFileSkillsSourceOptions
+                {
+                    AllowedScriptExtensions = SkillScriptRunner.AllowedExtensions
+                });
             var skills = await source.GetSkillsAsync(new AgentSkillsSourceContext(agent, session));
             var loaded = skills.Single(skill => skill.Frontmatter.Description.Contains("First copy.", StringComparison.Ordinal));
-            Assert.Null(await loaded.GetScriptAsync("scripts/run.py"));
+            Assert.NotNull(await loaded.GetScriptAsync("scripts/run.py"));
+            Assert.Null(await loaded.GetScriptAsync("scripts/skip.ps1"));
             Assert.NotNull(await loaded.GetResourceAsync("references/notes.txt"));
         }
         finally

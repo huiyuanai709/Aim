@@ -34,7 +34,7 @@ internal static class ReviewAgent
         try
         {
             if (request.SkillDirectories.Count > 0)
-                skills = CreateSkills(request.SkillDirectories);
+                skills = CreateSkills(request);
 
             var agent = chat.AsAIAgent(new ChatClientAgentOptions
             {
@@ -79,25 +79,27 @@ internal static class ReviewAgent
 
     private const string SkillsPrompt =
         """
-        Review skills are available. When one matches the diff, call load_skill, then read_skill_resource for a listed file. Do not call run_skill_script. Aim does not execute skill scripts.
+        Review skills are available. When one matches the diff, call load_skill, then read_skill_resource for a listed file. You may call run_skill_script for a listed .py, .sh, or .js script. It runs on this machine, in the skill directory, with the arguments you pass.
         <available_skills>
         {skills}
         </available_skills>
         """;
 
-    private static AgentSkillsProvider CreateSkills(IReadOnlyList<string> directories)
+    private static AgentSkillsProvider CreateSkills(ReviewAgentRequest request)
     {
+        var runner = new SkillScriptRunner(request.Progress, request.MaxToolChars);
         return new AgentSkillsProvider(
-            directories,
-            scriptRunner: null,
+            request.SkillDirectories,
+            runner.RunAsync,
             new AgentFileSkillsSourceOptions
             {
-                ScriptFilter = static _ => false
+                AllowedScriptExtensions = SkillScriptRunner.AllowedExtensions
             },
             new AgentSkillsProviderOptions
             {
                 DisableLoadSkillApproval = true,
                 DisableReadSkillResourceApproval = true,
+                DisableRunSkillScriptApproval = true,
                 SkillsInstructionPrompt = SkillsPrompt
             });
     }
