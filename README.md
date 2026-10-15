@@ -124,9 +124,22 @@ With `--agent`, Aim also registers a Microsoft Agent Framework `AgentSkillsProvi
 
 Duplicate directories are skipped. The first skill name wins. A missing configured path is a warning on stderr; a missing default directory is ignored. Each directory is scanned for `SKILL.md` files (a skill folder directly under the directory).
 
-`load_skill`, `read_skill_resource`, and `run_skill_script` do not ask for a second approval when `--agent` is on. Aim discovers `.py`, `.sh`, and `.js` scripts under the skill directory and runs them with `python3`, `/bin/sh`, or `node`. The script path is passed as an argument, not through a shell. The working directory is the skill directory. Microsoft Agent Framework rejects script paths that leave that directory, including symlink escapes, and Aim checks the path again before starting the process.
+`load_skill`, `read_skill_resource`, and `run_skill_script` do not ask for a second approval when `--agent` is on. Aim discovers `.py`, `.sh`, `.js`, `.cs`, and `.csx` scripts under the skill directory. The script path is passed on the process argument list, not through a shell. The working directory is the skill directory. Microsoft Agent Framework rejects script paths that leave that directory, including symlink escapes, and Aim checks the path again before starting the process.
 
-This is not a container. A script runs as your user, inherits the environment, and can read files or use the network. Output is capped by `maxtoolresultchars`, and the process is stopped after 20 seconds. Only point `--agent` at skill directories you trust. Other script types, including `.ps1` and `.cs`, are not run.
+When the file has no shebang, the extension selects the command:
+
+| Extension | Command |
+|-----------|---------|
+| `.py` | `python3 <script> <args>` (`python` on Windows) |
+| `.sh` | `/bin/sh <script> <args>` |
+| `.js` | `node <script> <args>` |
+| `.cs`, `.csx` | `dotnet run --file <script> -- <args>` |
+
+The C# command is the .NET 10 file-based app host. Arguments after `--` are for the script, not for `dotnet`.
+
+If the first line starts with `#!`, that interpreter is used instead of the table. Aim parses the line the way the kernel does: an absolute interpreter path, one optional argument, then the script path, then the user arguments. `#!/bin/sh` and `#!/usr/bin/env dotnet` are both accepted. The interpreter must exist, must be absolute, and must not contain `..`. A relative shebang is rejected.
+
+This is not a container. A script runs as your user, inherits the environment, and can read files or use the network. Output is capped by `maxtoolresultchars`, and the process is stopped after 20 seconds, including C# compile time. Only point `--agent` at skill directories you trust. Other script types, including `.ps1`, are not run.
 
 ```text
 .aim/skills/explicit-errors/SKILL.md

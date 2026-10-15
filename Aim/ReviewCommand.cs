@@ -272,7 +272,7 @@ public class ReviewCommand : Command
                     {
                         Console.Error.WriteLine("Skills: " + string.Join(", ", skills.Labels));
                         Console.Error.WriteLine(
-                            $"Note: Skill scripts (.py, .sh, .js) run as your user in the skill directory, with a {SkillScriptRunner.DefaultTimeout.TotalSeconds:0} second timeout. Only use skills you trust.");
+                            $"Note: Skill scripts (.py, .sh, .js, .cs, .csx) run as your user in the skill directory, with a {SkillScriptRunner.DefaultTimeout.TotalSeconds:0} second timeout. A shebang selects the interpreter. Only use skills you trust.");
                     }
 
                     Console.Error.WriteLine(

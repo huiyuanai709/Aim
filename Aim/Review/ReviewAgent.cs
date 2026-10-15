@@ -79,7 +79,7 @@ internal static class ReviewAgent
 
     private const string SkillsPrompt =
         """
-        Review skills are available. When one matches the diff, call load_skill, then read_skill_resource for a listed file. You may call run_skill_script for a listed .py, .sh, or .js script. It runs on this machine, in the skill directory, with the arguments you pass.
+        Review skills are available. When one matches the diff, call load_skill, then read_skill_resource for a listed file. You may call run_skill_script for a listed .py, .sh, .js, .cs, or .csx script. It runs on this machine, in the skill directory, with the arguments you pass.
         <available_skills>
         {skills}
         </available_skills>

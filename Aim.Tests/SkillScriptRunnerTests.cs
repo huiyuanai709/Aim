@@ -81,6 +81,69 @@ public class SkillScriptRunnerTests
         Assert.False(File.Exists(marker));
     }
 
+    [Fact]
+    public async Task ShebangOverridesTheExtensionMap()
+    {
+        using var repo = new ScriptRepo();
+        var marker = Path.Combine(Path.GetTempPath(), "aim-shebang-" + Guid.NewGuid().ToString("n"));
+        var arg = $"hello; touch {marker}";
+        repo.Write(".aim/skills/explicit-errors/scripts/check.py", """
+            #!/bin/sh
+            printf '%s\n' "$1"
+            """);
+
+        var script = await LoadScript(repo.Path, "scripts/check.py", maxChars: 4000, TimeSpan.FromSeconds(5));
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(new[] { arg }));
+        var result = Assert.IsType<string>(await script.Script.RunAsync(script.Skill, doc.RootElement, null, CancellationToken.None));
+
+        Assert.False(File.Exists(marker));
+        Assert.Contains(arg, result);
+        Assert.DoesNotContain("python", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("#!sh\nprintf ran\\n")]
+    [InlineData("#!/bin/../bin/sh\nprintf ran\\n")]
+    public async Task UnsafeShebangIsRejectedBeforeTheProcessStarts(string contents)
+    {
+        using var repo = new ScriptRepo();
+        var marker = Path.Combine(Path.GetTempPath(), "aim-shebang-bad-" + Guid.NewGuid().ToString("n"));
+        repo.Write(".aim/skills/explicit-errors/scripts/check.sh", contents + $"\ntouch {marker}\n");
+
+        var script = await LoadScript(repo.Path, "scripts/check.sh", maxChars: 2000, TimeSpan.FromSeconds(5));
+        var result = Assert.IsType<string>(await script.Script.RunAsync(script.Skill, null, null, CancellationToken.None));
+
+        Assert.False(File.Exists(marker));
+        Assert.Contains("Shebang interpreter", result);
+        Assert.DoesNotContain("ran", result);
+    }
+
+    [Fact]
+    public async Task CSharpScriptsUseDotnetRunAndKeepArgumentsLiteral()
+    {
+        using var repo = new ScriptRepo();
+        var marker = Path.Combine(Path.GetTempPath(), "aim-csharp-" + Guid.NewGuid().ToString("n"));
+        var arg = $"hello; touch {marker}";
+        repo.Write(".aim/skills/explicit-errors/scripts/check.cs", """
+            var value = args.Length > 0 ? args[0] : "";
+            Console.WriteLine(value);
+            """);
+        repo.Write(".aim/skills/explicit-errors/scripts/check.csx", """
+            var value = args.Length > 0 ? args[0] : "";
+            Console.WriteLine("csx:" + value);
+            """);
+
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(new[] { arg }));
+        var cs = await LoadScript(repo.Path, "scripts/check.cs", maxChars: 8000, TimeSpan.FromSeconds(40));
+        var csResult = Assert.IsType<string>(await cs.Script.RunAsync(cs.Skill, doc.RootElement, null, CancellationToken.None));
+        var csx = await LoadScript(repo.Path, "scripts/check.csx", maxChars: 8000, TimeSpan.FromSeconds(40));
+        var csxResult = Assert.IsType<string>(await csx.Script.RunAsync(csx.Skill, doc.RootElement, null, CancellationToken.None));
+
+        Assert.False(File.Exists(marker));
+        Assert.Contains(arg, csResult);
+        Assert.Contains("csx:" + arg, csxResult);
+    }
+
     private static async Task<(AgentFileSkill Skill, AgentSkillScript Script)> LoadScript(
         string repo,
         string name,

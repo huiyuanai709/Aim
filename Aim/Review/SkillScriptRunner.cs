@@ -9,8 +9,11 @@ internal sealed class SkillScriptRunner
 {
     public const int MaxArguments = 16;
     public const int MaxArgumentChars = 400;
+    public const int MaxShebangChars = 256;
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(20);
-    public static readonly string[] AllowedExtensions = [".py", ".sh", ".js"];
+    public static readonly string[] AllowedExtensions = [".py", ".sh", ".js", ".cs", ".csx"];
+
+    private readonly record struct Launch(string FileName, IReadOnlyList<string> Prefix, bool EndOfOptions);
 
     private readonly TextWriter _progress;
     private readonly int _maxChars;
@@ -31,26 +34,26 @@ internal sealed class SkillScriptRunner
         CancellationToken cancellationToken)
     {
         _ = serviceProvider;
-        if (!TryPrepare(skill, script, arguments, out var interpreter, out var scriptPath, out var args, out var error))
+        if (!TryPrepare(skill, script, arguments, out var launch, out var scriptPath, out var args, out var error))
         {
             _progress.WriteLine("▶ run_skill_script (rejected)");
             return error;
         }
 
         _progress.WriteLine($"▶ run_skill_script {skill.Frontmatter.Name} {script.Name}");
-        return await ExecuteAsync(interpreter, scriptPath, skill.Path, args, cancellationToken).ConfigureAwait(false);
+        return await ExecuteAsync(launch, scriptPath, skill.Path, args, cancellationToken).ConfigureAwait(false);
     }
 
     private bool TryPrepare(
         AgentFileSkill skill,
         AgentFileSkillScript script,
         JsonElement? arguments,
-        out string interpreter,
+        out Launch launch,
         out string scriptPath,
         out List<string> args,
         out string error)
     {
-        interpreter = "";
+        launch = default;
         scriptPath = "";
         args = [];
         if (string.IsNullOrWhiteSpace(skill.Path) || string.IsNullOrWhiteSpace(script.FullPath) || string.IsNullOrWhiteSpace(script.Name))
@@ -73,8 +76,7 @@ internal sealed class SkillScriptRunner
         }
 
         var extension = Path.GetExtension(scriptPath);
-        interpreter = Interpreter(extension);
-        if (interpreter.Length == 0 || !AllowedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+        if (!AllowedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
         {
             error = $"Scripts of type '{extension}' are not run. Allowed types: {string.Join(", ", AllowedExtensions)}.";
             return false;
@@ -86,7 +88,145 @@ internal sealed class SkillScriptRunner
             return false;
         }
 
+        if (!TryReadShebang(scriptPath, out var shebangProgram, out var shebangArgument, out error))
+            return false;
+
+        if (shebangProgram is not null)
+        {
+            if (!TryValidateInterpreter(shebangProgram, out error))
+                return false;
+            if (shebangArgument is not null && !IsSafeArgument(shebangArgument, out error))
+                return false;
+
+            launch = new Launch(shebangProgram, shebangArgument is null ? [] : [shebangArgument], false);
+        }
+        else if (!TryExtensionLaunch(extension, out launch, out error))
+        {
+            return false;
+        }
+
         return TryReadArguments(arguments, out args, out error);
+    }
+
+    private static bool TryReadShebang(string path, out string? program, out string? argument, out string error)
+    {
+        program = null;
+        argument = null;
+        error = "";
+        string text;
+        try
+        {
+            var buffer = new byte[MaxShebangChars];
+            using var stream = File.OpenRead(path);
+            var read = stream.Read(buffer, 0, buffer.Length);
+            text = Encoding.UTF8.GetString(buffer, 0, read);
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not read the script: {ex.Message}";
+            return false;
+        }
+
+        if (text.Length > 0 && text[0] == '\uFEFF')
+            text = text[1..];
+        if (!text.StartsWith("#!", StringComparison.Ordinal))
+            return true;
+
+        var newline = text.IndexOf('\n');
+        if (newline < 0 && text.Length >= MaxShebangChars)
+        {
+            error = "Shebang line is too long.";
+            return false;
+        }
+
+        var line = (newline < 0 ? text : text[..newline]).TrimEnd('\r');
+        var rest = line[2..].TrimStart(' ', '\t');
+        if (rest.Length == 0)
+        {
+            error = "Shebang is missing an interpreter.";
+            return false;
+        }
+
+        var split = rest.IndexOfAny([' ', '\t']);
+        program = split < 0 ? rest : rest[..split];
+        if (split >= 0)
+        {
+            var tail = rest[(split + 1)..].Trim();
+            if (tail.Length > 0)
+                argument = tail;
+        }
+
+        return true;
+    }
+
+    private static bool TryValidateInterpreter(string program, out string error)
+    {
+        if (program.Contains('\0') || program.Any(char.IsControl) || !Path.IsPathRooted(program))
+        {
+            error = "Shebang interpreter must be an absolute path.";
+            return false;
+        }
+
+        var segments = program.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (segments.Any(segment => segment == ".."))
+        {
+            error = "Shebang interpreter path must not contain '..'.";
+            return false;
+        }
+
+        if (!File.Exists(program))
+        {
+            error = $"Shebang interpreter was not found: {program}";
+            return false;
+        }
+
+        error = "";
+        return true;
+    }
+
+    private static bool IsSafeArgument(string value, out string error)
+    {
+        if (value.Contains('\0') || value.Any(char.IsControl))
+        {
+            error = "Shebang argument cannot contain control characters.";
+            return false;
+        }
+
+        if (value.Length > MaxArgumentChars)
+        {
+            error = $"Shebang argument must be at most {MaxArgumentChars} characters.";
+            return false;
+        }
+
+        error = "";
+        return true;
+    }
+
+    private static bool TryExtensionLaunch(string extension, out Launch launch, out string error)
+    {
+        switch (extension.ToLowerInvariant())
+        {
+            case ".py":
+                launch = new Launch(OperatingSystem.IsWindows() ? "python" : "python3", [], false);
+                break;
+            case ".sh":
+                launch = new Launch(OperatingSystem.IsWindows() ? "sh" : "/bin/sh", [], false);
+                break;
+            case ".js":
+                launch = new Launch("node", [], false);
+                break;
+            case ".cs":
+            case ".csx":
+                launch = new Launch("dotnet", ["run", "--file"], true);
+                break;
+            default:
+                launch = default;
+                error = $"Scripts of type '{extension}' are not run. Allowed types: {string.Join(", ", AllowedExtensions)}.";
+                return false;
+        }
+
+        error = "";
+        return true;
     }
 
     private static bool TryReadArguments(JsonElement? arguments, out List<string> args, out string error)
@@ -138,7 +278,7 @@ internal sealed class SkillScriptRunner
     }
 
     private async Task<string> ExecuteAsync(
-        string interpreter,
+        Launch launch,
         string scriptPath,
         string workingDirectory,
         List<string> args,
@@ -148,7 +288,7 @@ internal sealed class SkillScriptRunner
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = interpreter,
+                FileName = launch.FileName,
                 WorkingDirectory = workingDirectory,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -158,7 +298,11 @@ internal sealed class SkillScriptRunner
                 StandardErrorEncoding = Encoding.UTF8
             }
         };
+        foreach (var part in launch.Prefix)
+            process.StartInfo.ArgumentList.Add(part);
         process.StartInfo.ArgumentList.Add(scriptPath);
+        if (launch.EndOfOptions)
+            process.StartInfo.ArgumentList.Add("--");
         foreach (var arg in args)
             process.StartInfo.ArgumentList.Add(arg);
 
@@ -169,7 +313,7 @@ internal sealed class SkillScriptRunner
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            return $"Failed to start '{interpreter}': {ex.Message}";
+            return $"Failed to start '{launch.FileName}': {ex.Message}";
         }
 
         var stdoutTask = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
@@ -252,14 +396,6 @@ internal sealed class SkillScriptRunner
         {
         }
     }
-
-    private static string Interpreter(string extension) => extension.ToLowerInvariant() switch
-    {
-        ".py" => OperatingSystem.IsWindows() ? "python" : "python3",
-        ".sh" => OperatingSystem.IsWindows() ? "sh" : "/bin/sh",
-        ".js" => "node",
-        _ => ""
-    };
 
     private static StringComparison PathComparison() =>
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
