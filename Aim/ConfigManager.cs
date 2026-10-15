@@ -24,6 +24,8 @@ public class ConfigManager
         public int MaxDiffChars { get; set; } = 80000;
         public string ReviewModel { get; set; } = "";
         public int MaxReviewComments { get; set; } = 20;
+        public int MaxReviewRounds { get; set; } = 10;
+        public int MaxToolResultChars { get; set; } = 12000;
     }
 
     public static Config LoadConfig() => LoadFromFile(ConfigPath);
@@ -76,6 +78,8 @@ public class ConfigManager
         sb.AppendLine("[Review]");
         sb.AppendLine($"ReviewModel = {config.ReviewModel}");
         sb.AppendLine($"MaxReviewComments = {config.MaxReviewComments}");
+        sb.AppendLine($"MaxReviewRounds = {config.MaxReviewRounds}");
+        sb.AppendLine($"MaxToolResultChars = {config.MaxToolResultChars}");
         sb.AppendLine();
 
         return sb.ToString();
@@ -142,6 +146,26 @@ public class ConfigManager
 
                 config.MaxReviewComments = maxComments;
                 break;
+            case "maxreviewrounds":
+                if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxRounds) ||
+                    maxRounds < 1 || maxRounds > ReviewAgentLimits.MaxRounds)
+                {
+                    error = $"Error: maxreviewrounds must be an integer from 1 to {ReviewAgentLimits.MaxRounds}, got '{value}'.";
+                    return false;
+                }
+
+                config.MaxReviewRounds = maxRounds;
+                break;
+            case "maxtoolresultchars":
+                if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxToolChars) ||
+                    maxToolChars < 1 || maxToolChars > ReviewAgentLimits.MaxToolChars)
+                {
+                    error = $"Error: maxtoolresultchars must be an integer from 1 to {ReviewAgentLimits.MaxToolChars}, got '{value}'.";
+                    return false;
+                }
+
+                config.MaxToolResultChars = maxToolChars;
+                break;
             default:
                 error = $"Error: Unknown configuration key: {key}";
                 return false;
@@ -167,6 +191,8 @@ public class ConfigManager
         Console.WriteLine($"  MaxDiffChars:      {(config.MaxDiffChars <= 0 ? "(unlimited, no fallback)" : config.MaxDiffChars)}");
         Console.WriteLine($"  ReviewModel:       {(string.IsNullOrWhiteSpace(config.ReviewModel) ? "(not set, uses model)" : config.ReviewModel)}");
         Console.WriteLine($"  MaxReviewComments: {config.MaxReviewComments}");
+        Console.WriteLine($"  MaxReviewRounds:   {config.MaxReviewRounds}");
+        Console.WriteLine($"  MaxToolResultChars: {config.MaxToolResultChars}");
         Console.WriteLine(new string('-', 60));
     }
 }

@@ -15,6 +15,7 @@ AIM is a command-line tool that leverages AI to generate meaningful, semantic co
 - 🔄 **Auto-commit**: Optional automatic commit after message generation
 - 📝 **Amend Support**: Generate messages for amending previous commits
 - 🔍 **Diff review**: `aim review` prints line comments for staged changes, a triple-dot range, or one commit
+- 🛠️ **Optional review agent**: `--agent` can read files and search the repo before it answers. Off unless you ask for it
 - 🎨 **Clean Output**: Beautiful, readable console output
 
 ## 🚀 Quick Start
@@ -99,12 +100,21 @@ Review a diff and print AI line comments. The default input is staged changes (`
 - `--rule <file>`: extra rules text, appended to the built-in checklist.
 - `--background "..."`: extra product context for the model.
 - `--format text|json`: human-readable text (default) or a JSON array of comments.
+- `--agent`: opt in to a Microsoft Agent Framework review agent (`ChatClientAgent`) that may call `file_read` and `code_search` before the final answer. Off by default. The final answer is still the same JSON comment array.
+- `--max-rounds <n>`: cap agent tool rounds (1–40). Overrides `maxreviewrounds`. Without `--agent`, a valid value is ignored after a note on stderr.
 
 Line numbers refer to the **new file** in the diff. Aim writes those numbers onto the diff before calling the model. It does not relocate comments afterward, so a line that does not match the file on disk is best-effort.
 
 When the diff is longer than `maxdiffchars`, Aim warns and sends a prefix of the patch, keeping whole files when they fit. If the budget cannot hold a hunk, it falls back to file names (the same idea as `aim commit`). `diffnameonly=true` sends only file names.
 
 Each comment has `path`, `start_line`, `end_line`, `severity` (`critical`, `high`, `medium`, `low`), `category` (`bug`, `security`, `performance`, `maintainability`, `style`, `other`), `content`, and an optional `suggestion_code`. At most `maxreviewcomments` comments are printed (default 20). Set `reviewmodel` when review should use a different model than `model`.
+
+With `--agent`, the agent may call two tools before that JSON array:
+
+- `file_read` reads a repo-relative file. For `--commit`, or for `--from`/`--to`, it uses `git show` of that commit or the `--to` ref. A staged review reads the working tree. Paths must stay inside the repository. A read returns at most 200 lines.
+- `code_search` runs `git grep` for a fixed string (not a shell command and not a regular expression) and returns at most 80 lines.
+
+Tool progress is printed on stderr (`▶ file_read …`, `▶ code_search …`). Tool text is truncated to `maxtoolresultchars` (default 12000). Agent rounds default to `maxreviewrounds` (10).
 
 An empty diff prints a message and exits with code 1. A review that finds nothing to say exits 0.
 
@@ -121,6 +131,9 @@ aim review --commit HEAD
 
 # JSON for scripts
 aim review --format json
+
+# Let the agent read files and search before answering
+aim review --agent --max-rounds 8
 
 # Product context and a local rules file
 aim review --background "Payments service. Prefer explicit errors." --rule ./REVIEW.md
@@ -148,6 +161,8 @@ Manage configuration settings.
 | `maxdiffchars` | Max diff size before truncation or name-only fallback (`0` = no limit) | `80000` |
 | `reviewmodel` | Model for `aim review`. Empty uses `model` | _(empty)_ |
 | `maxreviewcomments` | Maximum review comments to print | `20` |
+| `maxreviewrounds` | Maximum `--agent` tool rounds | `10` |
+| `maxtoolresultchars` | Maximum characters returned by one review tool | `12000` |
 
 **Examples:**
 ```bash
@@ -161,7 +176,7 @@ aim config --set apikey=sk-...
 aim config --set apikey=sk-... model=gpt-4o maxdiffchars=80000
 
 # Use a separate model for review and cap the comment count
-aim config --set reviewmodel=gpt-4o maxreviewcomments=20
+aim config --set reviewmodel=gpt-4o maxreviewcomments=20 maxreviewrounds=10 maxtoolresultchars=12000
 
 # Or repeat --set
 aim config --set apikey=sk-... --set model=gpt-4o --set autocommit=true
@@ -201,6 +216,8 @@ MaxDiffChars = 80000
 [Review]
 ReviewModel =
 MaxReviewComments = 20
+MaxReviewRounds = 10
+MaxToolResultChars = 12000
 ```
 
 ## 🎯 Commit Message Rules
@@ -216,7 +233,8 @@ AIM generates commit messages following these conventions:
 ## 🔧 Technology Stack
 
 - **.NET 10.0**: Latest .NET with native AOT compilation
-- **OpenAI SDK**: Official OpenAI .NET library (v2.7.0)
+- **OpenAI SDK**: Official OpenAI .NET library (v2.14.0)
+- **Microsoft Agent Framework**: `ChatClientAgent` for the optional `aim review --agent` tool loop (v1.25.0). Microsoft.Extensions.AI is the chat client underneath that agent.
 - **System.CommandLine**: Modern command-line parsing (v2.0.0)
 - **Microsoft.Extensions.Configuration**: Robust configuration management
 

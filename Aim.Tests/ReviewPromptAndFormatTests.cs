@@ -32,6 +32,35 @@ public class ReviewPromptAndFormatTests
         Assert.Contains("Flag swallowed exceptions.", prompt);
         Assert.Contains("was truncated", prompt);
         Assert.Contains("suggestion_code", prompt);
+        Assert.DoesNotContain("file_read", prompt);
+    }
+
+    [Fact]
+    public void AgentPromptMentionsToolsAndKeepsTheJsonContract()
+    {
+        var prompt = ReviewPrompt.Build(new ReviewPromptInput
+        {
+            Diff = "diff --git a/a.cs b/a.cs\n+var x = 1;\n",
+            DiffLabel = "staged changes (git diff --cached)",
+            NameOnly = false,
+            Truncated = false,
+            MaxComments = 20,
+            AgentTools = true
+        });
+
+        Assert.Contains("file_read", prompt);
+        Assert.Contains("code_search", prompt);
+        Assert.Contains("only the JSON array", prompt);
+
+        var instructions = ReviewPrompt.AgentInstructions(nameOnly: false);
+        Assert.Contains("file_read", instructions);
+        Assert.Contains("code_search", instructions);
+        Assert.Contains("JSON array", instructions);
+        Assert.DoesNotContain("Only file names", instructions);
+
+        var nameOnly = ReviewPrompt.AgentInstructions(nameOnly: true);
+        Assert.Contains("file_read", nameOnly);
+        Assert.Contains("file names only", nameOnly);
     }
 
     [Fact]

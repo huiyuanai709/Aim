@@ -1,5 +1,6 @@
 using System.ClientModel;
 using System.CommandLine;
+using System.Globalization;
 using System.Text;
 using OpenAI;
 using OpenAI.Chat;
@@ -43,6 +44,15 @@ public class ReviewCommand : Command
             HelpName = "text|json",
             DefaultValueFactory = _ => "text"
         };
+        Option<bool> agentOption = new("--agent")
+        {
+            Description = "Opt in to a review agent that can read files and search the repository before answering. Off by default."
+        };
+        Option<string?> maxRoundsOption = new("--max-rounds")
+        {
+            Description = "Maximum agent tool rounds (1-40). Overrides maxreviewrounds. Used only with --agent.",
+            HelpName = "n"
+        };
 
         Options.Add(fromOption);
         Options.Add(toOption);
@@ -50,6 +60,8 @@ public class ReviewCommand : Command
         Options.Add(ruleOption);
         Options.Add(backgroundOption);
         Options.Add(formatOption);
+        Options.Add(agentOption);
+        Options.Add(maxRoundsOption);
 
         SetAction(async (parseResult, cancellationToken) =>
         {
@@ -87,7 +99,32 @@ public class ReviewCommand : Command
             }
 
             var background = parseResult.GetValue(backgroundOption);
+            var agentEnabled = parseResult.GetValue(agentOption);
+            if (!TryParseMaxRounds(parseResult.GetValue(maxRoundsOption), out var maxRoundsCli, out var maxRoundsError))
+            {
+                Console.Error.WriteLine(maxRoundsError);
+                return 1;
+            }
+
             var config = ConfigManager.LoadConfig();
+            var maxRounds = config.MaxReviewRounds;
+            if (agentEnabled || maxRoundsCli is not null)
+            {
+                if (!ReviewAgentLimits.TryResolveRounds(
+                        maxRoundsCli,
+                        config.MaxReviewRounds,
+                        agentEnabled,
+                        out maxRounds,
+                        out var roundsNote,
+                        out var roundsError))
+                {
+                    Console.Error.WriteLine(roundsError);
+                    return 1;
+                }
+
+                if (!string.IsNullOrEmpty(roundsNote))
+                    Console.Error.WriteLine(roundsNote);
+            }
             var nameOnly = config.DiffNameOnly;
             var (success, diff, diffError) = ReviewDiffLoader.Load(target, nameOnly);
             if (!success)
@@ -208,7 +245,8 @@ public class ReviewCommand : Command
                 Truncated = truncated,
                 MaxComments = maxComments,
                 Background = background,
-                ExtraRules = rules
+                ExtraRules = rules,
+                AgentTools = agentEnabled
             });
 
             var endpoint = string.IsNullOrWhiteSpace(config.ApiEndpoint)
@@ -217,17 +255,47 @@ public class ReviewCommand : Command
 
             try
             {
-                Console.Error.WriteLine($"Reviewing {ReviewDiffLoader.Describe(target)} with {model}...");
-                var openAI = new OpenAIClient(
-                    new ApiKeyCredential(config.ApiKey),
-                    new OpenAIClientOptions { Endpoint = new Uri(endpoint) });
-                var chatClient = openAI.GetChatClient(model);
-                var response = await chatClient.CompleteChatAsync(
-                    [new UserChatMessage(prompt)],
-                    null,
-                    cancellationToken);
+                string raw;
+                if (agentEnabled)
+                {
+                    var toolChars = ReviewAgentLimits.ResolveToolChars(config.MaxToolResultChars);
+                    if (toolChars != config.MaxToolResultChars)
+                    {
+                        Console.Error.WriteLine(
+                            $"Warning: maxtoolresultchars must be from 1 to {ReviewAgentLimits.MaxToolChars}. Using {toolChars}.");
+                    }
 
-                var raw = ReadContent(response.Value);
+                    Console.Error.WriteLine(
+                        $"Reviewing {ReviewDiffLoader.Describe(target)} with {model} (agent, up to {maxRounds} rounds)...");
+                    raw = await ReviewAgent.CompleteAsync(
+                        new ReviewAgentRequest
+                        {
+                            ApiKey = config.ApiKey,
+                            Endpoint = endpoint,
+                            Model = model,
+                            WorkingDirectory = Environment.CurrentDirectory,
+                            MaxRounds = maxRounds,
+                            MaxToolChars = toolChars,
+                            NameOnly = nameOnly,
+                            Revision = ReviewAgentLimits.ToolRevision(target),
+                            Progress = Console.Error
+                        },
+                        prompt,
+                        cancellationToken);
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Reviewing {ReviewDiffLoader.Describe(target)} with {model}...");
+                    var openAI = new OpenAIClient(
+                        new ApiKeyCredential(config.ApiKey),
+                        new OpenAIClientOptions { Endpoint = new Uri(endpoint) });
+                    var chatClient = openAI.GetChatClient(model);
+                    var response = await chatClient.CompleteChatAsync(
+                        [new UserChatMessage(prompt)],
+                        null,
+                        cancellationToken);
+                    raw = ReadContent(response.Value);
+                }
                 var parsed = ReviewCommentParser.Parse(raw, maxComments);
                 if (!parsed.Success)
                 {
@@ -276,6 +344,23 @@ public class ReviewCommand : Command
                 return 1;
             }
         });
+    }
+
+    private static bool TryParseMaxRounds(string? text, out int? rounds, out string error)
+    {
+        rounds = null;
+        error = "";
+        if (string.IsNullOrWhiteSpace(text))
+            return true;
+
+        if (!int.TryParse(text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        {
+            error = $"Error: --max-rounds must be an integer from 1 to {ReviewAgentLimits.MaxRounds}.";
+            return false;
+        }
+
+        rounds = parsed;
+        return true;
     }
 
     private static void WriteGitError(string diffError)

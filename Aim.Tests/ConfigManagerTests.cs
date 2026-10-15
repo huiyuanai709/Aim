@@ -18,7 +18,9 @@ public class ConfigManagerTests
             DiffNameOnly = true,
             MaxDiffChars = 1234,
             ReviewModel = "gpt-review",
-            MaxReviewComments = 7
+            MaxReviewComments = 7,
+            MaxReviewRounds = 6,
+            MaxToolResultChars = 4000
         };
 
         var path = Path.Combine(Path.GetTempPath(), "aim-config-" + Guid.NewGuid().ToString("n") + ".ini");
@@ -36,6 +38,8 @@ public class ConfigManagerTests
             Assert.Equal(1234, loaded.MaxDiffChars);
             Assert.Equal("gpt-review", loaded.ReviewModel);
             Assert.Equal(7, loaded.MaxReviewComments);
+            Assert.Equal(6, loaded.MaxReviewRounds);
+            Assert.Equal(4000, loaded.MaxToolResultChars);
         }
         finally
         {
@@ -54,6 +58,8 @@ public class ConfigManagerTests
             Assert.Equal("gpt-4o", loaded.Model);
             Assert.Equal("", loaded.ReviewModel);
             Assert.Equal(20, loaded.MaxReviewComments);
+            Assert.Equal(10, loaded.MaxReviewRounds);
+            Assert.Equal(12000, loaded.MaxToolResultChars);
         }
         finally
         {
@@ -83,5 +89,16 @@ public class ConfigManagerTests
 
         Assert.False(ConfigManager.TryApply(config, "nope", "1", out error));
         Assert.Contains("Unknown configuration key", error);
+
+        Assert.True(ConfigManager.TryApply(config, "maxreviewrounds", "8", out error), error);
+        Assert.Equal(8, config.MaxReviewRounds);
+        Assert.False(ConfigManager.TryApply(config, "maxreviewrounds", "0", out error));
+        Assert.Contains("1 to 40", error);
+        Assert.False(ConfigManager.TryApply(config, "maxreviewrounds", "41", out error));
+
+        Assert.True(ConfigManager.TryApply(config, "maxtoolresultchars", "500", out error), error);
+        Assert.Equal(500, config.MaxToolResultChars);
+        Assert.False(ConfigManager.TryApply(config, "maxtoolresultchars", "0", out error));
+        Assert.Contains("1 to 200000", error);
     }
 }

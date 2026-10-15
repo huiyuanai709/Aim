@@ -11,6 +11,7 @@ internal sealed class ReviewPromptInput
     public required int MaxComments { get; init; }
     public string? Background { get; init; }
     public string? ExtraRules { get; init; }
+    public bool AgentTools { get; init; }
 }
 
 internal static class ReviewPrompt
@@ -65,6 +66,11 @@ internal static class ReviewPrompt
             sb.AppendLine("- The diff was truncated to fit a size limit. Review only what is shown. Do not assume omitted files are fine.");
         }
 
+        if (input.AgentTools)
+        {
+            sb.AppendLine("You can call file_read and code_search to inspect the repository. Your final message must still be only the JSON array.");
+        }
+
         sb.AppendLine();
         sb.AppendLine("Example shape (English only to show the fields, not the language you must use):");
         sb.AppendLine("""[{"path":"src/Counter.cs","start_line":8,"end_line":8,"severity":"high","category":"bug","content":"The loop increments the index before the bounds check, so the last item is never visited.","suggestion_code":"while (index < items.Count)\n{\n    Visit(items[index]);\n    index++;\n}"}]""");
@@ -91,5 +97,17 @@ internal static class ReviewPrompt
         sb.AppendLine(body);
         sb.Append("</diff>");
         return sb.ToString();
+    }
+
+    public static string AgentInstructions(bool nameOnly)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("You review a git diff for Aim. You may call file_read and code_search before you answer.");
+        sb.AppendLine("file_read returns one repository file. code_search finds a fixed string with git grep. Neither tool submits a comment.");
+        if (nameOnly)
+            sb.AppendLine("The user message lists file names only. Use file_read to see contents, and stay focused on the files named in the diff.");
+        sb.AppendLine("Your final message must be only the JSON array described in the user message. Do not wrap it in markdown. If nothing is worth reporting, return [].");
+        sb.AppendLine("Write comments in the language that fits the code. Do not assume Chinese or English.");
+        return sb.ToString().TrimEnd();
     }
 }
