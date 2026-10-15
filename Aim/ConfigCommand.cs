@@ -58,7 +58,7 @@ public class ConfigCommand : Command
                     var key = parts[0].Trim();
                     var value = parts[1].Trim();
 
-                    if (!TryApplyConfigValue(config, key, value, out var error))
+                    if (!ConfigManager.TryApply(config, key, value, out var error))
                     {
                         Console.Error.WriteLine(error);
                         return 1;
@@ -74,39 +74,5 @@ public class ConfigCommand : Command
             ConfigManager.ShowConfig();
             return 0;
         });
-    }
-
-    private static bool TryApplyConfigValue(ConfigManager.Config config, string key, string value, out string error)
-    {
-        switch (key.ToLower())
-        {
-            case "apikey":
-                config.ApiKey = value;
-                break;
-            case "apiendpoint":
-                config.ApiEndpoint = value;
-                break;
-            case "model":
-                config.Model = value;
-                break;
-            case "autocommit":
-                config.AutoCommit = bool.Parse(value);
-                break;
-            case "maxsubjectlength":
-                config.MaxSubjectLength = int.Parse(value);
-                break;
-            case "diffnameonly":
-                config.DiffNameOnly = bool.Parse(value);
-                break;
-            case "maxdiffchars":
-                config.MaxDiffChars = int.Parse(value);
-                break;
-            default:
-                error = $"Error: Unknown configuration key: {key}";
-                return false;
-        }
-
-        error = string.Empty;
-        return true;
     }
 }

@@ -1,9 +1,10 @@
 ﻿using System.CommandLine;
 using Aim;
 
-RootCommand rootCommand = new("AIM: Git Intelligence Message - Automatically generate commit messages using AI")
+RootCommand rootCommand = new("AIM: AI commit messages and diff review for Git")
 {
     new ConfigCommand(),
-    new CommitCommand()
+    new CommitCommand(),
+    new ReviewCommand()
 };
 return await rootCommand.Parse(args).InvokeAsync();

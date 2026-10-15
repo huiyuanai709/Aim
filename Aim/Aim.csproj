@@ -13,22 +13,31 @@
         <RepositoryType>git</RepositoryType>
         <RepositoryUrl>https://github.com/huiyuanai709/Aim</RepositoryUrl>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
-        <Description>AIM: Git Intelligence Message - Automatically generate commit messages using AI</Description>
-        <PackageTags>AI GitCommit git Tools</PackageTags>
+        <Description>AIM: AI commit messages and diff review for Git</Description>
+        <PackageTags>AI GitCommit git Tools Review</PackageTags>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <PackageOutputPath>./nupkg</PackageOutputPath>
         <Version>1.0.2</Version>
     </PropertyGroup>
 
     <ItemGroup>
+      <PackageReference Include="Microsoft.Agents.AI" Version="1.25.0" />
+      <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.25.0" />
+      <PackageReference Include="Microsoft.Extensions.AI" Version="10.10.0" />
+      <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.10.1" />
+      <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.10.1" />
       <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
       <PackageReference Include="Microsoft.Extensions.Configuration.Ini" Version="10.0.0" />
-      <PackageReference Include="OpenAI" Version="2.7.0" />
+      <PackageReference Include="OpenAI" Version="2.14.0" />
       <PackageReference Include="System.CommandLine" Version="2.0.0" />
     </ItemGroup>
 
     <ItemGroup>
       <NONE Include="..\README.md" Pack="true" PackagePath="\" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <InternalsVisibleTo Include="Aim.Tests" />
     </ItemGroup>
 
 </Project>
