@@ -96,7 +96,7 @@ Review a diff and print AI line comments. The default input is staged changes (`
 
 **Options:**
 - `--from <ref>` / `--to <ref>`: review the triple-dot range. That is the changes on `--to` since it diverged from `--from`. The two flags must be passed together.
-- `--commit <rev>`: review the patch of one commit. Cannot be combined with `--from` / `--to`.
+- `--commit [rev]`: review the patch of one commit. With no revision, reviews the latest commit on `HEAD` (the same as `--commit HEAD`). Cannot be combined with `--from` / `--to`.
 - `--branch`: review changes on the current `HEAD` since it diverged from the repository default branch. The diff is the triple-dot range `<default>...HEAD`. Do not combine it with `--from`, `--to`, or `--commit`. Omitting every range flag still reviews staged changes.
 - `--first-commit`: review only the oldest commit that is on `HEAD` and not on the default branch. Do not combine it with `--from`, `--to`, `--commit`, or `--branch`.
 - `--rule <file>`: extra rules text, appended to the built-in checklist.
@@ -209,6 +209,9 @@ aim review --first-commit
 
 # Review commits on feature since it diverged from main
 aim review --from main --to feature
+
+# Review the latest commit
+aim review --commit
 
 # Review one commit
 aim review --commit HEAD

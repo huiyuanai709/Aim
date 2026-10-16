@@ -38,6 +38,53 @@ public class ReviewTargetTests
     }
 
     [Fact]
+    public void BareCommitReviewsLatestHeadCommit()
+    {
+        Assert.True(ReviewTarget.TryParse(null, null, null, false, false, "text", out var target, out var error, commitSpecified: true), error);
+        Assert.Equal(ReviewInputKind.Commit, target.Kind);
+        Assert.Equal(ReviewTarget.LatestCommit, target.Commit);
+        Assert.Null(target.From);
+        Assert.Null(target.To);
+
+        Assert.True(ReviewTarget.TryParse(null, null, "  ", false, false, null, out target, out error, true), error);
+        Assert.Equal(ReviewInputKind.Commit, target.Kind);
+        Assert.Equal("HEAD", target.Commit);
+    }
+
+    [Fact]
+    public void ExplicitCommitRevisionIsUnchanged()
+    {
+        Assert.True(ReviewTarget.TryParse(null, null, "HEAD", false, false, null, out var head, out var error, true), error);
+        Assert.Equal(ReviewInputKind.Commit, head.Kind);
+        Assert.Equal("HEAD", head.Commit);
+
+        Assert.True(ReviewTarget.TryParse(null, null, "HEAD~0", false, false, "json", out var parent, out error, true), error);
+        Assert.Equal("HEAD~0", parent.Commit);
+        Assert.Equal("json", parent.Format);
+
+        Assert.True(ReviewTarget.TryParse(null, null, "abc123", false, false, null, out var sha, out error, true), error);
+        Assert.Equal("abc123", sha.Commit);
+    }
+
+    [Fact]
+    public void BareCommitStaysExclusiveWithOtherTargets()
+    {
+        Assert.False(ReviewTarget.TryParse(null, null, null, true, false, null, out _, out var error, true));
+        Assert.Contains("--branch", error);
+        Assert.Contains("--commit", error);
+
+        Assert.False(ReviewTarget.TryParse(null, null, " ", false, true, null, out _, out error, true));
+        Assert.Contains("--first-commit", error);
+        Assert.Contains("--commit", error);
+
+        Assert.False(ReviewTarget.TryParse("main", "HEAD", null, false, false, null, out _, out error, true));
+        Assert.Contains("--from/--to", error);
+
+        Assert.False(ReviewTarget.TryParse("main", null, null, false, false, null, out _, out error, true));
+        Assert.Contains("--from and --to", error);
+    }
+
+    [Fact]
     public void ParsesRangeAndCommit()
     {
         Assert.True(ReviewTarget.TryParse("main", "feature", null, false, false, "text", out var range, out var error), error);
