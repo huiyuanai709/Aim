@@ -22,8 +22,9 @@ public class ReviewCommand : Command
         };
         Option<string?> commitOption = new("--commit")
         {
-            Description = "Review the patch of one commit (SHA or ref). Cannot be combined with --from/--to.",
-            HelpName = "rev"
+            Description = "Review the patch of one commit (SHA or ref). With no revision, reviews the latest commit on HEAD (same as --commit HEAD). Cannot be combined with --from/--to.",
+            HelpName = "rev",
+            Arity = ArgumentArity.ZeroOrOne
         };
         Option<bool> branchOption = new("--branch")
         {
@@ -95,15 +96,7 @@ public class ReviewCommand : Command
 
         SetAction(async (parseResult, cancellationToken) =>
         {
-            if (!ReviewTarget.TryParse(
-                    parseResult.GetValue(fromOption),
-                    parseResult.GetValue(toOption),
-                    parseResult.GetValue(commitOption),
-                    parseResult.GetValue(branchOption),
-                    parseResult.GetValue(firstCommitOption),
-                    parseResult.GetValue(formatOption),
-                    out var target,
-                    out var error))
+            if (!TryParseTarget(parseResult, out var target, out var error))
             {
                 Console.Error.WriteLine(error);
                 return 1;
@@ -626,6 +619,22 @@ public class ReviewCommand : Command
                 return 1;
             }
         });
+    }
+
+    internal static bool TryParseTarget(ParseResult parseResult, out ReviewTarget target, out string error)
+    {
+        var commitOption = parseResult.CommandResult.Command.Options.Single(option => option.Name == "--commit");
+        var commitSpecified = parseResult.GetResult(commitOption) is { Implicit: false };
+        return ReviewTarget.TryParse(
+            parseResult.GetValue<string?>("--from"),
+            parseResult.GetValue<string?>("--to"),
+            parseResult.GetValue<string?>("--commit"),
+            parseResult.GetValue<bool>("--branch"),
+            parseResult.GetValue<bool>("--first-commit"),
+            parseResult.GetValue<string>("--format"),
+            out target,
+            out error,
+            commitSpecified);
     }
 
     private static int WriteSingleGroupFailure(ReviewGroupOutcome outcome, int timeoutMinutes)

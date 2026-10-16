@@ -16,6 +16,8 @@ internal sealed record ReviewTarget(
     string? Commit,
     string Format)
 {
+    public const string LatestCommit = "HEAD";
+
     public static bool TryParse(
         string? from,
         string? to,
@@ -24,12 +26,15 @@ internal sealed record ReviewTarget(
         bool firstCommit,
         string? format,
         out ReviewTarget target,
-        out string error)
+        out string error,
+        bool commitSpecified = false)
     {
         target = new ReviewTarget(ReviewInputKind.Staged, null, null, null, "text");
         from = BlankToNull(from);
         to = BlankToNull(to);
         commit = BlankToNull(commit);
+        if (commitSpecified && commit is null)
+            commit = LatestCommit;
         format = string.IsNullOrWhiteSpace(format) ? "text" : format.Trim().ToLowerInvariant();
 
         if (format is not ("text" or "json"))
