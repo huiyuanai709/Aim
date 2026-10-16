@@ -4,7 +4,7 @@
 
 AIM is a command-line tool that leverages AI to generate meaningful, semantic commit messages based on your Git changes. Say goodbye to generic "update files" commits and hello to clear, professional commit history.
 
-`aim review` uses the same OpenAI-compatible setup to comment on a diff: staged changes by default, or a commit range when you pass refs.
+`aim review` uses the same OpenAI-compatible setup to comment on a diff: staged changes by default, a commit range when you pass refs, or the current branch against the default branch with `--branch`.
 
 ## ✨ Features
 
@@ -14,7 +14,7 @@ AIM is a command-line tool that leverages AI to generate meaningful, semantic co
 - ⚙️ **Configurable**: Customize model, endpoint, message length, and behavior
 - 🔄 **Auto-commit**: Optional automatic commit after message generation
 - 📝 **Amend Support**: Generate messages for amending previous commits
-- 🔍 **Diff review**: `aim review` prints line comments for staged changes, a triple-dot range, or one commit
+- 🔍 **Diff review**: `aim review` prints line comments for staged changes, a triple-dot range, the current branch against the default branch, or one commit
 - 🛠️ **Optional review agent**: `--agent` can read files and search the repo before it answers. Off unless you ask for it
 - 🎨 **Clean Output**: Beautiful, readable console output
 
@@ -97,6 +97,8 @@ Review a diff and print AI line comments. The default input is staged changes (`
 **Options:**
 - `--from <ref>` / `--to <ref>`: review the triple-dot range. That is the changes on `--to` since it diverged from `--from`. The two flags must be passed together.
 - `--commit <rev>`: review the patch of one commit. Cannot be combined with `--from` / `--to`.
+- `--branch`: review changes on the current `HEAD` since it diverged from the repository default branch. The diff is the triple-dot range `<default>...HEAD`. Do not combine it with `--from`, `--to`, or `--commit`. Omitting every range flag still reviews staged changes.
+- `--first-commit`: review only the oldest commit that is on `HEAD` and not on the default branch. Do not combine it with `--from`, `--to`, `--commit`, or `--branch`.
 - `--rule <file>`: extra rules text, appended to the built-in checklist.
 - `--background "..."`: extra product context for the model.
 - `--format text|json`: human-readable text (default) or a JSON array of comments.
@@ -111,7 +113,7 @@ Each comment has `path`, `start_line`, `end_line`, `severity` (`critical`, `high
 
 With `--agent`, the agent may call two tools before that JSON array:
 
-- `file_read` reads a repo-relative file. For `--commit`, or for `--from`/`--to`, it uses `git show` of that commit or the `--to` ref. A staged review reads the working tree. Paths must stay inside the repository. A read returns at most 200 lines.
+- `file_read` reads a repo-relative file. For `--commit` or `--first-commit`, it uses `git show` of that commit. For `--from`/`--to` or `--branch`, it uses `git show` of the head ref (`--to`, or `HEAD` for `--branch`). A staged review reads the working tree. Paths must stay inside the repository. A read returns at most 200 lines.
 - `code_search` runs `git grep` for a fixed string (not a shell command and not a regular expression) and returns at most 80 lines.
 
 Tool progress is printed on stderr (`▶ file_read …`, `▶ code_search …`). Tool text is truncated to `maxtoolresultchars` (default 12000). Agent rounds default to `maxreviewrounds` (10).
@@ -165,10 +167,33 @@ Prefer an explicit error over an empty catch.
 
 An empty diff prints a message and exits with code 1. A review that finds nothing to say exits 0.
 
+**Default branch.** `--branch` and `--first-commit` choose the base ref locally. They do not contact the network. The remote they read is `origin` only.
+
+1. `git symbolic-ref --quiet --short refs/remotes/origin/HEAD`, when that name points at a commit. After a normal clone this is usually `origin/main`.
+2. Otherwise the first of `main`, `master`, `origin/main`, and `origin/master` that points at a commit.
+
+If none of those refs exist, Aim exits and names the refs it tried. It also exits when the directory is not a git repository, or when `HEAD` is not a commit yet.
+
+`--branch` then runs the same comparison as `--from <default> --to HEAD`.
+
+`--first-commit` finds the merge base of that default ref and `HEAD`, then reviews the oldest commit in `merge-base..HEAD`. That commit is the first line of:
+
+```bash
+git rev-list --reverse "$(git merge-base <default> HEAD)"..HEAD
+```
+
+Do not add `--max-count=1` next to `--reverse`. Git applies the count first, so that prints the newest commit. If `HEAD` has no commit of its own since the merge base, Aim says so and exits. If the two histories never meet, it reports that there is no merge base.
+
 **Examples:**
 ```bash
 # Review staged changes
 aim review
+
+# Review the current branch against the default branch
+aim review --branch
+
+# Review only the first commit that is unique to this branch
+aim review --first-commit
 
 # Review commits on feature since it diverged from main
 aim review --from main --to feature
@@ -319,7 +344,7 @@ This project is open source. Please check the LICENSE file for details.
 ## 🐛 Troubleshooting
 
 ### "No changes to commit" / "No staged changes to review"
-Make sure you've staged your changes with `git add` first, or use `aim commit --all`. For review, you can also pass `--from` and `--to`, or `--commit`.
+Make sure you've staged your changes with `git add` first, or use `aim commit --all`. For review, you can also pass `--branch`, `--from` and `--to`, `--commit`, or `--first-commit`.
 
 ### "API key is required"
 Set your API key with: `aim config --set apikey=YOUR_KEY`

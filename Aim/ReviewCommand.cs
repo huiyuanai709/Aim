@@ -11,7 +11,7 @@ public class ReviewCommand : Command
 {
     public ReviewCommand() : base(
         "review",
-        "Review a git diff and print AI line comments. Defaults to staged changes. Line numbers refer to the new file and are best-effort.")
+        "Review a git diff and print AI line comments. Defaults to staged changes. Use --branch for default-branch...HEAD. Line numbers refer to the new file and are best-effort.")
     {
         Option<string?> fromOption = new("--from")
         {
@@ -27,6 +27,14 @@ public class ReviewCommand : Command
         {
             Description = "Review the patch of one commit (SHA or ref). Cannot be combined with --from/--to.",
             HelpName = "rev"
+        };
+        Option<bool> branchOption = new("--branch")
+        {
+            Description = "Review HEAD against the default branch (triple-dot). Default branch is origin/HEAD, or else main, master, origin/main, origin/master. Not with --from, --to, or --commit."
+        };
+        Option<bool> firstCommitOption = new("--first-commit")
+        {
+            Description = "Review the oldest commit on HEAD that is not on the default branch. Not with --from, --to, --commit, or --branch."
         };
         Option<string?> ruleOption = new("--rule")
         {
@@ -57,6 +65,8 @@ public class ReviewCommand : Command
         Options.Add(fromOption);
         Options.Add(toOption);
         Options.Add(commitOption);
+        Options.Add(branchOption);
+        Options.Add(firstCommitOption);
         Options.Add(ruleOption);
         Options.Add(backgroundOption);
         Options.Add(formatOption);
@@ -69,6 +79,8 @@ public class ReviewCommand : Command
                     parseResult.GetValue(fromOption),
                     parseResult.GetValue(toOption),
                     parseResult.GetValue(commitOption),
+                    parseResult.GetValue(branchOption),
+                    parseResult.GetValue(firstCommitOption),
                     parseResult.GetValue(formatOption),
                     out var target,
                     out var error))
@@ -126,6 +138,16 @@ public class ReviewCommand : Command
                     Console.Error.WriteLine(roundsNote);
             }
             var nameOnly = config.DiffNameOnly;
+            if (!DefaultBranchResolver.TryPrepare(target, null, out var prepared, out var branchNote, out var prepareError))
+            {
+                Console.Error.WriteLine(prepareError);
+                return 1;
+            }
+
+            target = prepared;
+            if (!string.IsNullOrEmpty(branchNote))
+                Console.Error.WriteLine(branchNote);
+
             var (success, diff, diffError) = ReviewDiffLoader.Load(target, nameOnly);
             if (!success)
             {
@@ -379,6 +401,12 @@ public class ReviewCommand : Command
         var detail = diffError.Trim();
         if (detail.Length == 0)
             detail = "git exited with a non-zero status.";
+
+        if (detail.StartsWith("Error:", StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine(detail);
+            return;
+        }
 
         Console.Error.WriteLine($"Error running git diff: {detail}");
     }
