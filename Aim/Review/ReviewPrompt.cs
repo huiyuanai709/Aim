@@ -12,6 +12,7 @@ internal sealed class ReviewPromptInput
     public string? Background { get; init; }
     public string? ExtraRules { get; init; }
     public bool AgentTools { get; init; }
+    public string? GroupLabel { get; init; }
 }
 
 internal static class ReviewPrompt
@@ -69,6 +70,11 @@ internal static class ReviewPrompt
         if (input.AgentTools)
         {
             sb.AppendLine("You can call file_read and code_search to inspect the repository. Your final message must still be only the JSON array.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(input.GroupLabel))
+        {
+            sb.AppendLine($"- This call reviews one group of a larger change: {input.GroupLabel}. Comment only on the files in this diff.");
         }
 
         sb.AppendLine();

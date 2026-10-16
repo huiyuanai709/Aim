@@ -14,7 +14,7 @@ AIM is a command-line tool that leverages AI to generate meaningful, semantic co
 - ⚙️ **Configurable**: Customize model, endpoint, message length, and behavior
 - 🔄 **Auto-commit**: Optional automatic commit after message generation
 - 📝 **Amend Support**: Generate messages for amending previous commits
-- 🔍 **Diff review**: `aim review` prints line comments for staged changes, a triple-dot range, the current branch against the default branch, or one commit
+- 🔍 **Diff review**: `aim review` prints line comments for staged changes, a triple-dot range, the current branch against the default branch, or one commit. Large diffs are split into directory groups and reviewed together
 - 🛠️ **Optional review agent**: `--agent` can read files and search the repo before it answers. Off unless you ask for it
 - 🎨 **Clean Output**: Beautiful, readable console output
 
@@ -104,14 +104,26 @@ Review a diff and print AI line comments. The default input is staged changes (`
 - `--format text|json`: human-readable text (default) or a JSON array of comments.
 - `--agent`: opt in to a Microsoft Agent Framework review agent (`ChatClientAgent`) that may call `file_read` and `code_search`, and load file-based skills, before the final answer. Off by default. The final answer is still the same JSON comment array.
 - `--max-rounds <n>`: cap agent tool rounds (1–40). Overrides `maxreviewrounds`. Without `--agent`, a valid value is ignored after a note on stderr.
+- `--concurrency <n>`: how many groups to review at the same time when a diff is split (1–32). Default: `8`, or `reviewconcurrency`.
+- `--timeout <minutes>`: how long to wait for each review call, in minutes (1–60). Default: `5`, or `reviewtimeoutminutes`. This also raises the HTTP timeout. Without it, the OpenAI client stops a call at about 100 seconds.
+- `--max-tokens-budget <n>`: optional cap on how much diff text is sent. Aim estimates tokens as the group diff length divided by 4. The first group is always sent. Aim does not start a later group when the estimate would pass this number. Comments from the groups that finished are still printed.
+- `--preview`: print the files and groups that would be reviewed, then exit. Does not call the model and does not need an API key.
 
 Line numbers refer to the **new file** in the diff. Aim writes those numbers onto the diff before calling the model. It does not relocate comments afterward, so a line that does not match the file on disk is best-effort.
 
-When the diff is longer than `maxdiffchars`, Aim warns and sends a prefix of the patch, keeping whole files when they fit. If the budget cannot hold a hunk, it falls back to file names (the same idea as `aim commit`). `diffnameonly=true` sends only file names.
+A diff that already fits in one model call stays one call. That is true when `maxdiffchars` is greater than 0 and the whole diff fits in that budget (default `80000`), or when `maxdiffchars` is `0` and the diff has at most 10 files. Splitting those reviews would add calls without covering more of the diff.
+
+A larger diff is split by directory. Each group has at most 10 files. When `maxdiffchars` is greater than 0, each group also stays within that many characters. The groups run at the same time. `--agent` uses the same groups, the same concurrency, and the same timeout. The timeout covers every tool round in that group.
+
+A single file longer than 80% of `maxdiffchars` is skipped. Aim prints a warning on stderr and reviews the other files. One oversized file does not fail the run. If every file is oversized, the command exits with code 1. `maxdiffchars` of `0` does not skip files for size; a review with more than 10 files is still grouped by directory.
+
+Comments from every finished group are combined. Duplicates are removed. `maxreviewcomments` applies to the combined list. Text and JSON both use that list. If some groups fail or time out, Aim keeps the comments from the groups that succeeded and writes the reason on stderr. The command fails when no group succeeds.
+
+`diffnameonly=true` still sends one list of file names. A diff with no per-file `diff --git` headers also stays one call. For that call, Aim still warns and sends a prefix of the patch when it is longer than `maxdiffchars`, keeping whole files when they fit. If the budget cannot hold a hunk, it falls back to file names.
 
 Each comment has `path`, `start_line`, `end_line`, `severity` (`critical`, `high`, `medium`, `low`), `category` (`bug`, `security`, `performance`, `maintainability`, `style`, `other`), `content`, and an optional `suggestion_code`. At most `maxreviewcomments` comments are printed (default 20). Set `reviewmodel` when review should use a different model than `model`.
 
-With `--agent`, the agent may call two tools before that JSON array:
+With `--agent`, each group gets its own agent. A one-call review still uses one agent. The agent may call two tools before that JSON array:
 
 - `file_read` reads a repo-relative file. For `--commit` or `--first-commit`, it uses `git show` of that commit. For `--from`/`--to` or `--branch`, it uses `git show` of the head ref (`--to`, or `HEAD` for `--branch`). A staged review reads the working tree. Paths must stay inside the repository. A read returns at most 200 lines.
 - `code_search` runs `git grep` for a fixed string (not a shell command and not a regular expression) and returns at most 80 lines.
@@ -207,6 +219,18 @@ aim review --format json
 # Let the agent read files and search before answering
 aim review --agent --max-rounds 8
 
+# See which files and groups would be reviewed, without calling the model
+aim review --branch --preview
+
+# Review a large branch in parallel. Timeout is in minutes.
+aim review --branch --concurrency 8 --timeout 5
+
+# Stop starting later groups after an approximate token budget
+aim review --branch --max-tokens-budget 80000
+
+# The agent uses the same groups and the same timeout
+aim review --branch --agent --concurrency 4 --timeout 10
+
 # Product context and a local rules file
 aim review --background "Payments service. Prefer explicit errors." --rule ./REVIEW.md
 ```
@@ -230,12 +254,14 @@ Manage configuration settings.
 | `autocommit` | Auto-commit after generation | `false`                     |
 | `maxsubjectlength` | Max characters in subject line | `72`                        |
 | `diffnameonly` | Show only file names in diff | `false`                     |
-| `maxdiffchars` | Max diff size before truncation or name-only fallback (`0` = no limit) | `80000` |
+| `maxdiffchars` | Size budget. `aim commit` falls back to file names above this. `aim review` keeps each call or group within it and splits a larger diff by directory. `0` = no character cap | `80000` |
 | `reviewmodel` | Model for `aim review`. Empty uses `model` | _(empty)_ |
 | `maxreviewcomments` | Maximum review comments to print | `20` |
 | `maxreviewrounds` | Maximum `--agent` tool rounds | `10` |
 | `maxtoolresultchars` | Maximum characters returned by one review tool | `12000` |
 | `skillspaths` | Extra `--agent` skill directories, separated by `;`. Relative paths use the repository root | _(empty)_ |
+| `reviewconcurrency` | Groups reviewed at the same time when a diff is split | `8` |
+| `reviewtimeoutminutes` | Minutes to wait for each review call. Also raises the HTTP timeout | `5` |
 
 **Examples:**
 ```bash
@@ -253,6 +279,9 @@ aim config --set reviewmodel=gpt-4o maxreviewcomments=20 maxreviewrounds=10 maxt
 
 # Add skill directories for aim review --agent
 aim config --set skillspaths=/opt/team-skills;../shared-skills
+
+# Review at most four groups at once, and wait up to 10 minutes for each call
+aim config --set reviewconcurrency=4 reviewtimeoutminutes=10
 
 # Or repeat --set
 aim config --set apikey=sk-... --set model=gpt-4o --set autocommit=true
@@ -295,6 +324,8 @@ MaxReviewComments = 20
 MaxReviewRounds = 10
 MaxToolResultChars = 12000
 SkillsPaths =
+ReviewConcurrency = 8
+ReviewTimeoutMinutes = 5
 ```
 
 ## 🎯 Commit Message Rules

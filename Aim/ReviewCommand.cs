@@ -1,9 +1,6 @@
-using System.ClientModel;
 using System.CommandLine;
 using System.Globalization;
-using System.Text;
 using OpenAI;
-using OpenAI.Chat;
 
 namespace Aim;
 
@@ -11,7 +8,7 @@ public class ReviewCommand : Command
 {
     public ReviewCommand() : base(
         "review",
-        "Review a git diff and print AI line comments. Defaults to staged changes. Use --branch for default-branch...HEAD. Line numbers refer to the new file and are best-effort.")
+        "Review a git diff and print AI line comments. Defaults to staged changes. Use --branch for default-branch...HEAD. Large diffs are split into directory groups and reviewed together. Line numbers refer to the new file and are best-effort.")
     {
         Option<string?> fromOption = new("--from")
         {
@@ -54,12 +51,31 @@ public class ReviewCommand : Command
         };
         Option<bool> agentOption = new("--agent")
         {
-            Description = "Opt in to a review agent that can read files and search the repository before answering. Off by default."
+            Description = "Opt in to a review agent that can read files and search the repository before answering. Off by default. Large diffs run one agent per group."
         };
         Option<string?> maxRoundsOption = new("--max-rounds")
         {
             Description = "Maximum agent tool rounds (1-40). Overrides maxreviewrounds. Used only with --agent.",
             HelpName = "n"
+        };
+        Option<int?> concurrencyOption = new("--concurrency")
+        {
+            Description = "How many file groups to review at the same time (1-32). Default: 8, or reviewconcurrency. Used when a diff is split.",
+            HelpName = "n"
+        };
+        Option<int?> timeoutOption = new("--timeout")
+        {
+            Description = "Minutes to wait for each review call (1-60). Default: 5, or reviewtimeoutminutes. Also raises the HTTP timeout, which otherwise stops a call at about 100 seconds.",
+            HelpName = "minutes"
+        };
+        Option<int?> budgetOption = new("--max-tokens-budget")
+        {
+            Description = "Approximate token budget for all groups (diff characters / 4). The first group is always sent. Later groups are not started when the estimate would exceed this. Omit for no limit.",
+            HelpName = "n"
+        };
+        Option<bool> previewOption = new("--preview")
+        {
+            Description = "Print the files and groups that would be reviewed, then exit. Does not call the model and does not need an API key."
         };
 
         Options.Add(fromOption);
@@ -72,6 +88,10 @@ public class ReviewCommand : Command
         Options.Add(formatOption);
         Options.Add(agentOption);
         Options.Add(maxRoundsOption);
+        Options.Add(concurrencyOption);
+        Options.Add(timeoutOption);
+        Options.Add(budgetOption);
+        Options.Add(previewOption);
 
         SetAction(async (parseResult, cancellationToken) =>
         {
@@ -112,6 +132,7 @@ public class ReviewCommand : Command
 
             var background = parseResult.GetValue(backgroundOption);
             var agentEnabled = parseResult.GetValue(agentOption);
+            var preview = parseResult.GetValue(previewOption);
             if (!TryParseMaxRounds(parseResult.GetValue(maxRoundsOption), out var maxRoundsCli, out var maxRoundsError))
             {
                 Console.Error.WriteLine(maxRoundsError);
@@ -119,6 +140,34 @@ public class ReviewCommand : Command
             }
 
             var config = ConfigManager.LoadConfig();
+            if (!ReviewParallelLimits.TryResolveConcurrency(
+                    parseResult.GetValue(concurrencyOption),
+                    config.ReviewConcurrency,
+                    out var concurrency,
+                    out var concurrencyNote,
+                    out var concurrencyError))
+            {
+                Console.Error.WriteLine(concurrencyError);
+                return 1;
+            }
+
+            if (!ReviewParallelLimits.TryResolveTimeout(
+                    parseResult.GetValue(timeoutOption),
+                    config.ReviewTimeoutMinutes,
+                    out var timeoutMinutes,
+                    out var timeoutNote,
+                    out var timeoutError))
+            {
+                Console.Error.WriteLine(timeoutError);
+                return 1;
+            }
+
+            if (!ReviewParallelLimits.TryResolveBudget(parseResult.GetValue(budgetOption), out var tokenBudget, out var budgetError))
+            {
+                Console.Error.WriteLine(budgetError);
+                return 1;
+            }
+
             var maxRounds = config.MaxReviewRounds;
             if (agentEnabled || maxRoundsCli is not null)
             {
@@ -137,6 +186,12 @@ public class ReviewCommand : Command
                 if (!string.IsNullOrEmpty(roundsNote))
                     Console.Error.WriteLine(roundsNote);
             }
+
+            if (!string.IsNullOrEmpty(concurrencyNote))
+                Console.Error.WriteLine(concurrencyNote);
+            if (!string.IsNullOrEmpty(timeoutNote))
+                Console.Error.WriteLine(timeoutNote);
+
             var nameOnly = config.DiffNameOnly;
             if (!DefaultBranchResolver.TryPrepare(target, null, out var prepared, out var branchNote, out var prepareError))
             {
@@ -161,14 +216,8 @@ public class ReviewCommand : Command
                 return 1;
             }
 
-            if (string.IsNullOrWhiteSpace(config.ApiKey))
-            {
-                Console.Error.WriteLine("Error: OpenAI API key is required.");
-                Console.Error.WriteLine("Run 'aim config --set apikey=YOUR_KEY' to save it.");
-                return 1;
-            }
-
             var truncated = false;
+            ReviewPlan? plan = null;
             if (nameOnly)
             {
                 Console.Error.WriteLine("Note: diffnameonly is enabled. Review comments cannot cite real line numbers.");
@@ -179,8 +228,48 @@ public class ReviewCommand : Command
                     diff = DiffLimiter.Limit(diff, config.MaxDiffChars).Text;
                     truncated = true;
                 }
+
+                if (preview)
+                {
+                    Console.WriteLine(ReviewDiffPlanner.FormatNameOnlyPreview(
+                        ReviewDiffLoader.Describe(target),
+                        diff,
+                        truncated));
+                    return 0;
+                }
             }
-            else if (config.MaxDiffChars > 0 && diff.Length > config.MaxDiffChars)
+            else
+            {
+                plan = ReviewDiffPlanner.Plan(diff, new ReviewPlanOptions { MaxDiffChars = config.MaxDiffChars });
+                if (preview)
+                {
+                    Console.WriteLine(ReviewDiffPlanner.FormatPreview(
+                        plan,
+                        ReviewDiffLoader.Describe(target),
+                        agentEnabled,
+                        concurrency,
+                        timeoutMinutes,
+                        tokenBudget));
+                    return plan.Unsplit || plan.Groups.Count > 0 ? 0 : 1;
+                }
+
+                if (!plan.Unsplit && plan.Groups.Count == 0)
+                {
+                    foreach (var skipped in plan.Skipped)
+                        Console.Error.WriteLine(ReviewDiffPlanner.SkipWarning(skipped));
+                    Console.Error.WriteLine("Error: Every file exceeds the single-file size limit, so there is nothing to review.");
+                    return 1;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(config.ApiKey))
+            {
+                Console.Error.WriteLine("Error: OpenAI API key is required.");
+                Console.Error.WriteLine("Run 'aim config --set apikey=YOUR_KEY' to save it.");
+                return 1;
+            }
+
+            if (!nameOnly && plan is { Unsplit: true } && config.MaxDiffChars > 0 && diff.Length > config.MaxDiffChars)
             {
                 var rawLength = diff.Length;
                 var fit = DiffLimiter.Fit(diff, config.MaxDiffChars);
@@ -253,88 +342,42 @@ public class ReviewCommand : Command
                 return 1;
             }
 
-            if (!nameOnly)
-                diff = DiffAnnotator.Annotate(diff);
-
-            if (truncated)
-                diff = diff.TrimEnd('\r', '\n') + "\n\n[truncated: additional diff content was omitted]\n";
-
-            var prompt = ReviewPrompt.Build(new ReviewPromptInput
-            {
-                Diff = diff,
-                DiffLabel = ReviewDiffLoader.DiffLabel(target, nameOnly),
-                NameOnly = nameOnly,
-                Truncated = truncated,
-                MaxComments = maxComments,
-                Background = background,
-                ExtraRules = rules,
-                AgentTools = agentEnabled
-            });
-
+            var timeout = TimeSpan.FromMinutes(timeoutMinutes);
+            var networkTimeout = ReviewChat.NetworkTimeoutFor(timeout);
             var endpoint = string.IsNullOrWhiteSpace(config.ApiEndpoint)
                 ? "https://api.openai.com/v1"
                 : config.ApiEndpoint.Trim();
+            var description = ReviewDiffLoader.Describe(target);
+            var grouped = plan is { Unsplit: false } && !nameOnly;
 
-            try
+            string BuildPrompt(string source, bool promptTruncated, bool annotate, string? groupLabel)
             {
-                string raw;
-                if (agentEnabled)
+                var body = annotate && !nameOnly ? DiffAnnotator.Annotate(source) : source;
+                return ReviewPrompt.Build(new ReviewPromptInput
                 {
-                    var toolChars = ReviewAgentLimits.ResolveToolChars(config.MaxToolResultChars);
-                    if (toolChars != config.MaxToolResultChars)
-                    {
-                        Console.Error.WriteLine(
-                            $"Warning: maxtoolresultchars must be from 1 to {ReviewAgentLimits.MaxToolChars}. Using {toolChars}.");
-                    }
+                    Diff = body,
+                    DiffLabel = ReviewDiffLoader.DiffLabel(target, nameOnly),
+                    NameOnly = nameOnly,
+                    Truncated = promptTruncated,
+                    MaxComments = maxComments,
+                    Background = background,
+                    ExtraRules = rules,
+                    AgentTools = agentEnabled,
+                    GroupLabel = groupLabel
+                });
+            }
 
-                    var skills = ReviewSkillPaths.Resolve(Environment.CurrentDirectory, config.SkillsPaths);
-                    foreach (var note in skills.Notes)
-                        Console.Error.WriteLine(note);
-                    if (skills.Directories.Count > 0)
-                    {
-                        Console.Error.WriteLine("Skills: " + string.Join(", ", skills.Labels));
-                        Console.Error.WriteLine(
-                            $"Note: Skill scripts (.py, .sh, .js, .cs, .csx) run as your user in the skill directory, with a {SkillScriptRunner.DefaultTimeout.TotalSeconds:0} second timeout. A shebang selects the interpreter. Only use skills you trust.");
-                    }
-
-                    Console.Error.WriteLine(
-                        $"Reviewing {ReviewDiffLoader.Describe(target)} with {model} (agent, up to {maxRounds} rounds)...");
-                    raw = await ReviewAgent.CompleteAsync(
-                        new ReviewAgentRequest
-                        {
-                            ApiKey = config.ApiKey,
-                            Endpoint = endpoint,
-                            Model = model,
-                            WorkingDirectory = Environment.CurrentDirectory,
-                            MaxRounds = maxRounds,
-                            MaxToolChars = toolChars,
-                            NameOnly = nameOnly,
-                            Revision = ReviewAgentLimits.ToolRevision(target),
-                            Progress = Console.Error,
-                            SkillDirectories = skills.Directories
-                        },
-                        prompt,
-                        cancellationToken);
-                }
-                else
-                {
-                    Console.Error.WriteLine($"Reviewing {ReviewDiffLoader.Describe(target)} with {model}...");
-                    var openAI = new OpenAIClient(
-                        new ApiKeyCredential(config.ApiKey),
-                        new OpenAIClientOptions { Endpoint = new Uri(endpoint) });
-                    var chatClient = openAI.GetChatClient(model);
-                    var response = await chatClient.CompleteChatAsync(
-                        [new UserChatMessage(prompt)],
-                        null,
-                        cancellationToken);
-                    raw = ReadContent(response.Value);
-                }
-                var parsed = ReviewCommentParser.Parse(raw, maxComments);
+            int PrintParsed(ReviewParseResult parsed, bool diffTruncated, bool partial, string? rawOnFailure)
+            {
                 if (!parsed.Success)
                 {
                     Console.Error.WriteLine($"Error: {parsed.Error}");
-                    Console.Error.WriteLine("Raw response:");
-                    Console.Error.WriteLine(Excerpt(raw));
+                    if (!string.IsNullOrEmpty(rawOnFailure))
+                    {
+                        Console.Error.WriteLine("Raw response:");
+                        Console.Error.WriteLine(Excerpt(rawOnFailure));
+                    }
+
                     return 1;
                 }
 
@@ -342,8 +385,12 @@ public class ReviewCommand : Command
                 {
                     Console.Error.WriteLine(
                         $"Error: The model returned {parsed.Skipped} comment(s) but none matched the review schema.");
-                    Console.Error.WriteLine("Raw response:");
-                    Console.Error.WriteLine(Excerpt(raw));
+                    if (!string.IsNullOrEmpty(rawOnFailure))
+                    {
+                        Console.Error.WriteLine("Raw response:");
+                        Console.Error.WriteLine(Excerpt(rawOnFailure));
+                    }
+
                     return 1;
                 }
 
@@ -362,13 +409,207 @@ public class ReviewCommand : Command
 
                 var rendered = target.Format == "json"
                     ? ReviewFormatter.ToJson(parsed.Comments)
-                    : ReviewFormatter.ToText(parsed.Comments, truncated, nameOnly);
+                    : ReviewFormatter.ToText(parsed.Comments, diffTruncated, nameOnly, partial);
                 Console.WriteLine(rendered);
                 return 0;
+            }
+
+            try
+            {
+                var log = grouped && plan!.Groups.Count > 1
+                    ? new LockedTextWriter(Console.Error)
+                    : Console.Error;
+                var skills = agentEnabled
+                    ? ReviewSkillPaths.Resolve(Environment.CurrentDirectory, config.SkillsPaths)
+                    : null;
+                if (skills is not null)
+                {
+                    foreach (var note in skills.Notes)
+                        Console.Error.WriteLine(note);
+                    if (skills.Directories.Count > 0)
+                    {
+                        Console.Error.WriteLine("Skills: " + string.Join(", ", skills.Labels));
+                        Console.Error.WriteLine(
+                            $"Note: Skill scripts (.py, .sh, .js, .cs, .csx) run as your user in the skill directory, with a {SkillScriptRunner.DefaultTimeout.TotalSeconds:0} second timeout. A shebang selects the interpreter. Only use skills you trust.");
+                    }
+                }
+
+                var toolChars = ReviewAgentLimits.ResolveToolChars(config.MaxToolResultChars);
+                if (agentEnabled && toolChars != config.MaxToolResultChars)
+                {
+                    Console.Error.WriteLine(
+                        $"Warning: maxtoolresultchars must be from 1 to {ReviewAgentLimits.MaxToolChars}. Using {toolChars}.");
+                }
+
+                OpenAIClient? client = null;
+                ReviewAgentRequest? agentRequest = null;
+                if (agentEnabled)
+                {
+                    agentRequest = new ReviewAgentRequest
+                    {
+                        ApiKey = config.ApiKey,
+                        Endpoint = endpoint,
+                        Model = model,
+                        WorkingDirectory = Environment.CurrentDirectory,
+                        MaxRounds = maxRounds,
+                        MaxToolChars = toolChars,
+                        NameOnly = nameOnly,
+                        Revision = ReviewAgentLimits.ToolRevision(target),
+                        Progress = log,
+                        SkillDirectories = skills?.Directories ?? [],
+                        NetworkTimeout = networkTimeout
+                    };
+                }
+                else
+                {
+                    client = ReviewChat.CreateClient(config.ApiKey!, endpoint, networkTimeout);
+                }
+
+                async Task<string> Invoke(string prompt, CancellationToken ct)
+                {
+                    if (agentEnabled)
+                        return await ReviewAgent.CompleteAsync(agentRequest!, prompt, ct);
+
+                    return await ReviewChat.CompleteAsync(client!, model, prompt, ct);
+                }
+
+                async Task<string> InvokeWithTimeout(string prompt, CancellationToken ct)
+                {
+                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    cts.CancelAfter(timeout);
+                    try
+                    {
+                        return await Invoke(prompt, cts.Token);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        throw new TimeoutException(
+                            $"The review timed out after {ReviewParallelLimits.FormatMinutes(timeoutMinutes)}. Raise --timeout (minutes) for a large diff.");
+                    }
+                }
+
+                void WriteStart(int groups)
+                {
+                    if (agentEnabled && groups > 1)
+                    {
+                        Console.Error.WriteLine(
+                            $"Reviewing {description} with {model} (agent, up to {maxRounds} rounds, {groups} groups, concurrency {concurrency}, {ReviewParallelLimits.FormatMinutes(timeoutMinutes)} timeout per group)...");
+                        return;
+                    }
+
+                    if (agentEnabled)
+                    {
+                        Console.Error.WriteLine(
+                            $"Reviewing {description} with {model} (agent, up to {maxRounds} rounds)...");
+                        return;
+                    }
+
+                    if (groups > 1)
+                    {
+                        Console.Error.WriteLine(
+                            $"Reviewing {description} with {model} ({groups} groups, concurrency {concurrency}, {ReviewParallelLimits.FormatMinutes(timeoutMinutes)} timeout per group)...");
+                        return;
+                    }
+
+                    Console.Error.WriteLine($"Reviewing {description} with {model}...");
+                }
+
+                if (!grouped)
+                {
+                    var body = nameOnly ? diff : DiffAnnotator.Annotate(diff);
+                    if (truncated)
+                        body = body.TrimEnd('\r', '\n') + "\n\n[truncated: additional diff content was omitted]\n";
+
+                    var prompt = BuildPrompt(body, truncated, annotate: false, groupLabel: null);
+                    WriteStart(1);
+                    var raw = await InvokeWithTimeout(prompt, cancellationToken);
+                    var parsed = ReviewCommentParser.Parse(raw, maxComments);
+                    return PrintParsed(parsed, truncated, partial: false, raw);
+                }
+
+                foreach (var skipped in plan!.Skipped)
+                    Console.Error.WriteLine(ReviewDiffPlanner.SkipWarning(skipped));
+
+                WriteStart(plan.Groups.Count);
+                var batch = await ReviewBatch.RunAsync(
+                    plan.Groups,
+                    new ReviewBatchRequest
+                    {
+                        Concurrency = concurrency,
+                        GroupTimeout = timeout,
+                        MaxTokensBudget = tokenBudget,
+                        MaxComments = maxComments
+                    },
+                    async (group, ct) =>
+                    {
+                        var source = plan.SingleShot ? diff : group.Diff;
+                        var groupLabel = plan.Groups.Count > 1
+                            ? $"{group.Label} ({group.Files.Count} {(group.Files.Count == 1 ? "file" : "files")})"
+                            : null;
+                        var prompt = BuildPrompt(
+                            source,
+                            promptTruncated: plan.Skipped.Count > 0 && plan.Groups.Count == 1,
+                            annotate: true,
+                            groupLabel);
+                        var raw = await Invoke(prompt, ct);
+                        if (plan.Groups.Count > 1)
+                        {
+                            log.WriteLine(
+                                $"Group {group.Number.ToString(CultureInfo.InvariantCulture)}/{plan.Groups.Count.ToString(CultureInfo.InvariantCulture)} ({group.Label}) finished.");
+                        }
+
+                        return raw;
+                    },
+                    cancellationToken);
+
+                if (!batch.AnySuccess)
+                {
+                    if (plan.Groups.Count == 1)
+                        return WriteSingleGroupFailure(batch.Outcomes[0], timeoutMinutes);
+
+                    Console.Error.WriteLine("Error: No review group finished successfully.");
+                    foreach (var outcome in batch.Outcomes)
+                        Console.Error.WriteLine($"Error: Group {outcome.Group.Number} ({outcome.Group.Label}): {DescribeFailure(outcome, timeoutMinutes)}");
+                    return 1;
+                }
+
+                var deferred = 0;
+                foreach (var outcome in batch.Outcomes)
+                {
+                    if (outcome.Status == ReviewGroupStatus.Succeeded)
+                        continue;
+
+                    if (outcome.Status == ReviewGroupStatus.OverBudget)
+                    {
+                        deferred++;
+                        continue;
+                    }
+
+                    var detail = DescribeFailure(outcome, timeoutMinutes);
+                    if (!detail.EndsWith('.'))
+                        detail += ".";
+                    Console.Error.WriteLine(
+                        $"Warning: Group {outcome.Group.Number} ({outcome.Group.Label}) {detail}");
+                }
+
+                if (deferred > 0)
+                {
+                    Console.Error.WriteLine(
+                        $"Note: {deferred} group(s) were not sent because they would exceed --max-tokens-budget {tokenBudget.ToString(CultureInfo.InvariantCulture)}. Showing comments from the groups that finished.");
+                }
+
+                var partial = plan.Skipped.Count > 0 || batch.Outcomes.Any(outcome => outcome.Status != ReviewGroupStatus.Succeeded);
+                var combined = ReviewParseResult.Ok(batch.Comments, batch.SkippedSchema, batch.OmittedByCap);
+                return PrintParsed(combined, diffTruncated: false, partial, rawOnFailure: null);
             }
             catch (OperationCanceledException)
             {
                 Console.Error.WriteLine("\nOperation was cancelled");
+                return 1;
+            }
+            catch (TimeoutException ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
                 return 1;
             }
             catch (Exception ex)
@@ -378,6 +619,38 @@ public class ReviewCommand : Command
             }
         });
     }
+
+    private static int WriteSingleGroupFailure(ReviewGroupOutcome outcome, int timeoutMinutes)
+    {
+        switch (outcome.Status)
+        {
+            case ReviewGroupStatus.TimedOut:
+                Console.Error.WriteLine(
+                    $"Error: The review timed out after {ReviewParallelLimits.FormatMinutes(timeoutMinutes)}. Raise --timeout (minutes) for a large diff.");
+                return 1;
+            case ReviewGroupStatus.ApiError:
+                Console.Error.WriteLine($"Error calling AI API: {outcome.Error}");
+                return 1;
+            default:
+                Console.Error.WriteLine($"Error: {outcome.Error}");
+                if (outcome.Raw.Length > 0)
+                {
+                    Console.Error.WriteLine("Raw response:");
+                    Console.Error.WriteLine(Excerpt(outcome.Raw));
+                }
+
+                return 1;
+        }
+    }
+
+    private static string DescribeFailure(ReviewGroupOutcome outcome, int timeoutMinutes) => outcome.Status switch
+    {
+        ReviewGroupStatus.TimedOut => $"timed out after {ReviewParallelLimits.FormatMinutes(timeoutMinutes)}",
+        ReviewGroupStatus.OverBudget => "was not sent because the token budget was reached",
+        ReviewGroupStatus.ApiError => $"failed: {outcome.Error}",
+        ReviewGroupStatus.ParseError => $"was skipped: {outcome.Error}",
+        _ => outcome.Error
+    };
 
     private static bool TryParseMaxRounds(string? text, out int? rounds, out string error)
     {
@@ -409,18 +682,6 @@ public class ReviewCommand : Command
         }
 
         Console.Error.WriteLine($"Error running git diff: {detail}");
-    }
-
-    private static string ReadContent(ChatCompletion completion)
-    {
-        var sb = new StringBuilder();
-        foreach (var part in completion.Content)
-        {
-            if (!string.IsNullOrEmpty(part.Text))
-                sb.Append(part.Text);
-        }
-
-        return sb.ToString();
     }
 
     private static string Excerpt(string raw)
