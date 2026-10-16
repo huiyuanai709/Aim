@@ -137,7 +137,7 @@ public class ReviewDiffLoaderTests
 
     private static ReviewTarget Target(string? from, string? to, string? commit)
     {
-        Assert.True(ReviewTarget.TryParse(from, to, commit, "text", out var target, out var error), error);
+        Assert.True(ReviewTarget.TryParse(from, to, commit, false, false, "text", out var target, out var error), error);
         return target;
     }
 

@@ -4,7 +4,9 @@ internal enum ReviewInputKind
 {
     Staged,
     Range,
-    Commit
+    Commit,
+    Branch,
+    FirstCommit
 }
 
 internal sealed record ReviewTarget(
@@ -18,6 +20,8 @@ internal sealed record ReviewTarget(
         string? from,
         string? to,
         string? commit,
+        bool branch,
+        bool firstCommit,
         string? format,
         out ReviewTarget target,
         out string error)
@@ -32,6 +36,31 @@ internal sealed record ReviewTarget(
         {
             error = "Error: --format must be 'text' or 'json'.";
             return false;
+        }
+
+        if (branch && firstCommit)
+        {
+            error = "Error: --branch and --first-commit cannot be used together.";
+            return false;
+        }
+
+        if (branch || firstCommit)
+        {
+            if (from is not null || to is not null || commit is not null)
+            {
+                var flag = branch ? "--branch" : "--first-commit";
+                error = $"Error: {flag} cannot be combined with --from/--to or --commit.";
+                return false;
+            }
+
+            target = new ReviewTarget(
+                branch ? ReviewInputKind.Branch : ReviewInputKind.FirstCommit,
+                null,
+                null,
+                null,
+                format);
+            error = "";
+            return true;
         }
 
         if ((from is null) != (to is null))
