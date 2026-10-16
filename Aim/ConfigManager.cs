@@ -27,6 +27,8 @@ public class ConfigManager
         public int MaxReviewRounds { get; set; } = 10;
         public int MaxToolResultChars { get; set; } = 12000;
         public string SkillsPaths { get; set; } = "";
+        public int ReviewConcurrency { get; set; } = ReviewParallelLimits.DefaultConcurrency;
+        public int ReviewTimeoutMinutes { get; set; } = ReviewParallelLimits.DefaultTimeoutMinutes;
     }
 
     public static Config LoadConfig() => LoadFromFile(ConfigPath);
@@ -82,6 +84,8 @@ public class ConfigManager
         sb.AppendLine($"MaxReviewRounds = {config.MaxReviewRounds}");
         sb.AppendLine($"MaxToolResultChars = {config.MaxToolResultChars}");
         sb.AppendLine($"SkillsPaths = {config.SkillsPaths}");
+        sb.AppendLine($"ReviewConcurrency = {config.ReviewConcurrency}");
+        sb.AppendLine($"ReviewTimeoutMinutes = {config.ReviewTimeoutMinutes}");
         sb.AppendLine();
 
         return sb.ToString();
@@ -177,6 +181,26 @@ public class ConfigManager
 
                 config.SkillsPaths = value.Trim();
                 break;
+            case "reviewconcurrency":
+                if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var concurrency) ||
+                    concurrency < 1 || concurrency > ReviewParallelLimits.MaxConcurrency)
+                {
+                    error = $"Error: reviewconcurrency must be an integer from 1 to {ReviewParallelLimits.MaxConcurrency}, got '{value}'.";
+                    return false;
+                }
+
+                config.ReviewConcurrency = concurrency;
+                break;
+            case "reviewtimeoutminutes":
+                if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var timeoutMinutes) ||
+                    timeoutMinutes < 1 || timeoutMinutes > ReviewParallelLimits.MaxTimeoutMinutes)
+                {
+                    error = $"Error: reviewtimeoutminutes must be an integer from 1 to {ReviewParallelLimits.MaxTimeoutMinutes}, got '{value}'.";
+                    return false;
+                }
+
+                config.ReviewTimeoutMinutes = timeoutMinutes;
+                break;
             default:
                 error = $"Error: Unknown configuration key: {key}";
                 return false;
@@ -205,6 +229,8 @@ public class ConfigManager
         Console.WriteLine($"  MaxReviewRounds:   {config.MaxReviewRounds}");
         Console.WriteLine($"  MaxToolResultChars: {config.MaxToolResultChars}");
         Console.WriteLine($"  SkillsPaths:       {(string.IsNullOrWhiteSpace(config.SkillsPaths) ? "(not set)" : config.SkillsPaths)}");
+        Console.WriteLine($"  ReviewConcurrency: {config.ReviewConcurrency}");
+        Console.WriteLine($"  ReviewTimeoutMinutes: {config.ReviewTimeoutMinutes}");
         Console.WriteLine(new string('-', 60));
     }
 }

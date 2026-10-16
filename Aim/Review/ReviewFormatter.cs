@@ -11,13 +11,20 @@ internal static class ReviewFormatter
         return JsonSerializer.Serialize(list, ReviewJsonContext.Default.ListReviewComment);
     }
 
-    public static string ToText(IReadOnlyList<ReviewComment> comments, bool diffTruncated, bool nameOnly)
+    public static string ToText(
+        IReadOnlyList<ReviewComment> comments,
+        bool diffTruncated,
+        bool nameOnly,
+        bool partial = false)
     {
         if (comments.Count == 0)
         {
-            return diffTruncated
+            var message = diffTruncated
                 ? "No review comments for the portion of the diff that was sent."
                 : "No review comments.";
+            if (partial)
+                message += " Some files or groups were not reviewed.";
+            return message;
         }
 
         var sb = new StringBuilder();
@@ -36,6 +43,8 @@ internal static class ReviewFormatter
             sb.Append(" Only file names were sent, so lines are placeholders.");
         if (diffTruncated)
             sb.Append(" The diff was truncated before review.");
+        if (partial)
+            sb.Append(" Some files or groups were not reviewed.");
 
         return sb.ToString();
     }

@@ -21,7 +21,9 @@ public class ConfigManagerTests
             MaxReviewComments = 7,
             MaxReviewRounds = 6,
             MaxToolResultChars = 4000,
-            SkillsPaths = "/opt/team-skills;../shared"
+            SkillsPaths = "/opt/team-skills;../shared",
+            ReviewConcurrency = 4,
+            ReviewTimeoutMinutes = 9
         };
 
         var path = Path.Combine(Path.GetTempPath(), "aim-config-" + Guid.NewGuid().ToString("n") + ".ini");
@@ -42,6 +44,8 @@ public class ConfigManagerTests
             Assert.Equal(6, loaded.MaxReviewRounds);
             Assert.Equal(4000, loaded.MaxToolResultChars);
             Assert.Equal("/opt/team-skills;../shared", loaded.SkillsPaths);
+            Assert.Equal(4, loaded.ReviewConcurrency);
+            Assert.Equal(9, loaded.ReviewTimeoutMinutes);
         }
         finally
         {
@@ -63,6 +67,8 @@ public class ConfigManagerTests
             Assert.Equal(10, loaded.MaxReviewRounds);
             Assert.Equal(12000, loaded.MaxToolResultChars);
             Assert.Equal("", loaded.SkillsPaths);
+            Assert.Equal(8, loaded.ReviewConcurrency);
+            Assert.Equal(5, loaded.ReviewTimeoutMinutes);
         }
         finally
         {
@@ -110,5 +116,15 @@ public class ConfigManagerTests
         Assert.Equal("", config.SkillsPaths);
         Assert.False(ConfigManager.TryApply(config, "skillspaths", "a\nb", out error));
         Assert.Contains("single line", error);
+
+        Assert.True(ConfigManager.TryApply(config, "reviewconcurrency", "4", out error), error);
+        Assert.Equal(4, config.ReviewConcurrency);
+        Assert.False(ConfigManager.TryApply(config, "reviewconcurrency", "0", out error));
+        Assert.Contains("1 to 32", error);
+
+        Assert.True(ConfigManager.TryApply(config, "reviewtimeoutminutes", "12", out error), error);
+        Assert.Equal(12, config.ReviewTimeoutMinutes);
+        Assert.False(ConfigManager.TryApply(config, "reviewtimeoutminutes", "61", out error));
+        Assert.Contains("1 to 60", error);
     }
 }

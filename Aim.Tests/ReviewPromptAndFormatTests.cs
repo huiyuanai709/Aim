@@ -51,6 +51,7 @@ public class ReviewPromptAndFormatTests
         Assert.Contains("file_read", prompt);
         Assert.Contains("code_search", prompt);
         Assert.Contains("only the JSON array", prompt);
+        Assert.DoesNotContain("one group of a larger change", prompt);
 
         var instructions = ReviewPrompt.AgentInstructions(nameOnly: false);
         Assert.Contains("file_read", instructions);
@@ -141,5 +142,45 @@ public class ReviewPromptAndFormatTests
         Assert.Equal(
             "No review comments for the portion of the diff that was sent.",
             ReviewFormatter.ToText([], true, false));
+    }
+
+    [Fact]
+    public void GroupPromptStaysInsideItsFiles()
+    {
+        var prompt = ReviewPrompt.Build(new ReviewPromptInput
+        {
+            Diff = "diff --git a/src/A.cs b/src/A.cs\n+var x = 1;\n",
+            DiffLabel = "range main...HEAD (triple-dot)",
+            NameOnly = false,
+            Truncated = false,
+            MaxComments = 20,
+            GroupLabel = "src (2 files)"
+        });
+
+        Assert.Contains("one group of a larger change: src (2 files)", prompt);
+        Assert.Contains("Comment only on the files in this diff", prompt);
+    }
+
+    [Fact]
+    public void PartialTextSaysSomeOfTheDiffWasNotReviewed()
+    {
+        var text = ReviewFormatter.ToText([], diffTruncated: false, nameOnly: false, partial: true);
+        Assert.Equal("No review comments. Some files or groups were not reviewed.", text);
+
+        var withComment = ReviewFormatter.ToText(
+        [
+            new ReviewComment
+            {
+                Path = "a.cs",
+                StartLine = 1,
+                EndLine = 1,
+                Severity = "low",
+                Category = "style",
+                Content = "Name hides the unit."
+            }
+        ], false, false, partial: true);
+
+        Assert.Contains("1 comment.", withComment);
+        Assert.Contains("Some files or groups were not reviewed.", withComment);
     }
 }

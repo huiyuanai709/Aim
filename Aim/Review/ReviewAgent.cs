@@ -18,6 +18,7 @@ internal sealed class ReviewAgentRequest
     public string? Revision { get; init; }
     public TextWriter? Progress { get; init; }
     public IReadOnlyList<string> SkillDirectories { get; init; } = [];
+    public TimeSpan NetworkTimeout { get; init; } = TimeSpan.FromMinutes(ReviewParallelLimits.DefaultTimeoutMinutes);
 }
 
 internal static class ReviewAgent
@@ -25,9 +26,16 @@ internal static class ReviewAgent
     public static ChatClientAgent Create(ReviewAgentRequest request)
     {
         var tools = new ReviewTools(request.WorkingDirectory, request.Revision, request.MaxToolChars, request.Progress);
+        var networkTimeout = request.NetworkTimeout > TimeSpan.Zero
+            ? request.NetworkTimeout
+            : TimeSpan.FromMinutes(ReviewParallelLimits.DefaultTimeoutMinutes);
         var openAI = new OpenAIClient(
             new ApiKeyCredential(request.ApiKey),
-            new OpenAIClientOptions { Endpoint = new Uri(request.Endpoint) });
+            new OpenAIClientOptions
+            {
+                Endpoint = new Uri(request.Endpoint),
+                NetworkTimeout = networkTimeout
+            });
         var chat = openAI.GetChatClient(request.Model);
         IList<AITool> functions = [.. tools.CreateFunctions()];
         AgentSkillsProvider? skills = null;
