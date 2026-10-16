@@ -433,6 +433,8 @@ internal static class ReviewDiffPlanner
         return (int)total;
     }
 
+    internal static List<ReviewFilePatch> SplitPatches(string diff) => Split(diff);
+
     private static List<ReviewFilePatch> Split(string diff)
     {
         var normalized = diff.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');

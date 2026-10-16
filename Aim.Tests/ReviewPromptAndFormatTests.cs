@@ -108,6 +108,8 @@ public class ReviewPromptAndFormatTests
         Assert.Contains("    while (index < items.Count)", text);
         Assert.Contains("best-effort (not relocated)", text);
         Assert.Contains("1 comment.", text);
+        Assert.DoesNotContain("\u001b", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Code:", text);
     }
 
     [Fact]
