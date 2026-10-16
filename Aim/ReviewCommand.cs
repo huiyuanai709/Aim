@@ -409,7 +409,15 @@ public class ReviewCommand : Command
 
                 var rendered = target.Format == "json"
                     ? ReviewFormatter.ToJson(parsed.Comments)
-                    : ReviewFormatter.ToText(parsed.Comments, diffTruncated, nameOnly, partial);
+                    : ReviewFormatter.ToText(
+                        parsed.Comments,
+                        diffTruncated,
+                        nameOnly,
+                        partial,
+                        color: TerminalColor.Enabled,
+                        diff: diff,
+                        workingDirectory: Environment.CurrentDirectory,
+                        revision: ReviewAgentLimits.ToolRevision(target));
                 Console.WriteLine(rendered);
                 return 0;
             }

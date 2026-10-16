@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -5,6 +6,11 @@ namespace Aim;
 
 internal static class ReviewFormatter
 {
+    private const string Reset = "\u001b[0m";
+    private const string CriticalOrHigh = "\u001b[1;91m";
+    private const string Medium = "\u001b[33m";
+    private const string Low = "\u001b[2;36m";
+
     public static string ToJson(IReadOnlyList<ReviewComment> comments)
     {
         var list = comments as List<ReviewComment> ?? comments.ToList();
@@ -15,7 +21,11 @@ internal static class ReviewFormatter
         IReadOnlyList<ReviewComment> comments,
         bool diffTruncated,
         bool nameOnly,
-        bool partial = false)
+        bool partial = false,
+        bool color = false,
+        string? diff = null,
+        string? workingDirectory = null,
+        string? revision = null)
     {
         if (comments.Count == 0)
         {
@@ -27,13 +37,16 @@ internal static class ReviewFormatter
             return message;
         }
 
+        var includeSnippets = !nameOnly;
+        var index = includeSnippets ? ReviewCodeIndex.FromDiff(diff) : ReviewCodeIndex.Empty;
+        string? repoRoot = null;
         var sb = new StringBuilder();
         for (var i = 0; i < comments.Count; i++)
         {
             if (i > 0)
                 sb.AppendLine();
 
-            AppendComment(sb, comments[i]);
+            AppendComment(sb, comments[i], color, includeSnippets, index, workingDirectory, revision, ref repoRoot);
         }
 
         sb.AppendLine();
@@ -49,15 +62,32 @@ internal static class ReviewFormatter
         return sb.ToString();
     }
 
-    private static void AppendComment(StringBuilder sb, ReviewComment comment)
+    private static void AppendComment(
+        StringBuilder sb,
+        ReviewComment comment,
+        bool color,
+        bool includeSnippets,
+        ReviewCodeIndex index,
+        string? workingDirectory,
+        string? revision,
+        ref string? repoRoot)
     {
         var lines = comment.StartLine == comment.EndLine
-            ? comment.StartLine.ToString()
-            : $"{comment.StartLine}-{comment.EndLine}";
-        sb.AppendLine($"{comment.Path}:{lines}  {comment.Severity}  {comment.Category}");
+            ? comment.StartLine.ToString(CultureInfo.InvariantCulture)
+            : $"{comment.StartLine.ToString(CultureInfo.InvariantCulture)}-{comment.EndLine.ToString(CultureInfo.InvariantCulture)}";
+        sb.Append(comment.Path);
+        sb.Append(':');
+        sb.Append(lines);
+        sb.Append("  ");
+        AppendSeverity(sb, comment.Severity, color);
+        sb.Append("  ");
+        sb.AppendLine(comment.Category);
 
         foreach (var line in comment.Content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
             sb.AppendLine($"  {line}");
+
+        if (includeSnippets)
+            AppendSnippet(sb, comment, index, workingDirectory, revision, ref repoRoot);
 
         if (string.IsNullOrWhiteSpace(comment.SuggestionCode))
             return;
@@ -65,5 +95,87 @@ internal static class ReviewFormatter
         sb.AppendLine("  Suggestion:");
         foreach (var line in comment.SuggestionCode.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
             sb.AppendLine($"    {line}");
+    }
+
+    private static void AppendSeverity(StringBuilder sb, string severity, bool color)
+    {
+        var tint = color ? SeverityStyle(severity) : null;
+        if (tint is null)
+        {
+            sb.Append(severity);
+            return;
+        }
+
+        sb.Append(tint);
+        sb.Append(severity);
+        sb.Append(Reset);
+    }
+
+    private static string? SeverityStyle(string severity) => severity.ToLowerInvariant() switch
+    {
+        "critical" or "high" => CriticalOrHigh,
+        "medium" => Medium,
+        "low" => Low,
+        _ => null
+    };
+
+    private static void AppendSnippet(
+        StringBuilder sb,
+        ReviewComment comment,
+        ReviewCodeIndex index,
+        string? workingDirectory,
+        string? revision,
+        ref string? repoRoot)
+    {
+        var found = index.TryGet(comment.Path, comment.StartLine, comment.EndLine, out var lines, out var omitted);
+        if (!found && !string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            found = ReviewCodeIndex.TryReadFallback(
+                workingDirectory,
+                revision,
+                ref repoRoot,
+                comment.Path,
+                comment.StartLine,
+                comment.EndLine,
+                out lines,
+                out omitted);
+        }
+
+        if (!found || lines.Count == 0)
+            return;
+
+        sb.AppendLine("  Code:");
+        var width = 1;
+        foreach (var line in lines)
+            width = Math.Max(width, line.Number.ToString(CultureInfo.InvariantCulture).Length);
+
+        foreach (var line in lines)
+        {
+            sb.Append("    ");
+            sb.Append(line.Number.ToString(CultureInfo.InvariantCulture).PadLeft(width));
+            sb.Append(" | ");
+            sb.AppendLine(line.Text);
+        }
+
+        if (omitted > 0 && CoversPrintedWindow(lines, comment.StartLine))
+        {
+            sb.Append("    ... ");
+            sb.Append(omitted.ToString(CultureInfo.InvariantCulture));
+            sb.AppendLine(omitted == 1 ? " more line" : " more lines");
+        }
+    }
+
+    private static bool CoversPrintedWindow(List<ReviewSnippetLine> lines, int start)
+    {
+        if (lines.Count != ReviewCodeIndex.MaxLines)
+            return false;
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (lines[i].Number != start + i)
+                return false;
+        }
+
+        return true;
     }
 }
