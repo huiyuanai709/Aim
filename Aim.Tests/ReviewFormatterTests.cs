@@ -21,12 +21,126 @@ public class ReviewFormatterTests
     {
         var text = Render(color: true, diff: SampleDiff());
 
-        Assert.Contains("src/App.cs:11-12  \u001b[1;91mhigh\u001b[0m  bug", text, StringComparison.Ordinal);
-        Assert.Contains("src/Other.cs:3  \u001b[2;36mlow\u001b[0m  style", text, StringComparison.Ordinal);
-        Assert.Contains("lib/Mid.cs:4  \u001b[33mmedium\u001b[0m  performance", text, StringComparison.Ordinal);
-        Assert.Contains("lib/Mid.cs:8  \u001b[1;91mcritical\u001b[0m  security", text, StringComparison.Ordinal);
-        Assert.Contains("    11 | new line", text, StringComparison.Ordinal);
+        Assert.Contains("\u001b[1;36msrc/App.cs\u001b[0m:\u001b[1m11-12\u001b[0m  \u001b[1;91mhigh\u001b[0m  \u001b[35mbug\u001b[0m", text, StringComparison.Ordinal);
+        Assert.Contains("\u001b[1;36msrc/Other.cs\u001b[0m:\u001b[1m3\u001b[0m  \u001b[2;36mlow\u001b[0m  \u001b[35mstyle\u001b[0m", text, StringComparison.Ordinal);
+        Assert.Contains("\u001b[1;36mlib/Mid.cs\u001b[0m:\u001b[1m4\u001b[0m  \u001b[33mmedium\u001b[0m  \u001b[35mperformance\u001b[0m", text, StringComparison.Ordinal);
+        Assert.Contains("\u001b[1;36mlib/Mid.cs\u001b[0m:\u001b[1m8\u001b[0m  \u001b[1;91mcritical\u001b[0m  \u001b[35msecurity\u001b[0m", text, StringComparison.Ordinal);
+        Assert.Contains("src/App.cs", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[90m11 | \u001b[0m\u001b[94mnew\u001b[0m line", text, StringComparison.Ordinal);
+        Assert.Contains("\u001b[1;36mCode:\u001b[0m", text, StringComparison.Ordinal);
         Assert.DoesNotContain("\u001b[1;91mbug", text, StringComparison.Ordinal);
+
+        var prose = Assert.Single(text.Split('\n'), line => line.Contains("skipped", StringComparison.Ordinal));
+        Assert.Equal("  The last item is skipped.", prose);
+    }
+
+    [Fact]
+    public void ColorHighlightsCitedCodeAndSuggestion()
+    {
+        var diff = string.Join('\n',
+        [
+            "diff --git a/src/App.cs b/src/App.cs",
+            "--- a/src/App.cs",
+            "+++ b/src/App.cs",
+            "@@ -1,2 +1,2 @@",
+            "+if (count > 0) // ready",
+            "+    return \"ok\";"
+        ]);
+        var text = Render(color: true, diff: diff, comments:
+        [
+            Comment("src/App.cs", 1, 2, "high", "bug", "Check the count.", "return count;")
+        ]);
+
+        Assert.Contains("  \u001b[1;36mCode:\u001b[0m", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[90m1 | \u001b[0m\u001b[94mif\u001b[0m (count > \u001b[33m0\u001b[0m) \u001b[90m// ready\u001b[0m", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[90m2 | \u001b[0m    \u001b[94mreturn\u001b[0m \u001b[32m\"ok\"\u001b[0m;", text, StringComparison.Ordinal);
+        Assert.Contains("  \u001b[1;36mSuggestion:\u001b[0m", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[94mreturn\u001b[0m count;", text, StringComparison.Ordinal);
+        Assert.Contains("\n1 comment. Line numbers refer to the new file and are best-effort (not relocated).", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PlainTextLeavesKeywordsUncolored()
+    {
+        var diff = string.Join('\n',
+        [
+            "diff --git a/src/App.cs b/src/App.cs",
+            "--- a/src/App.cs",
+            "+++ b/src/App.cs",
+            "@@ -1,1 +1,1 @@",
+            "+if (count > 0) // ready"
+        ]);
+        var text = Render(color: false, diff: diff, comments:
+        [
+            Comment("src/App.cs", 1, 1, "high", "bug", "Check the count.", "return count;")
+        ]);
+
+        Assert.Contains("src/App.cs:1  high  bug", text, StringComparison.Ordinal);
+        Assert.Contains("  Code:\n    1 | if (count > 0) // ready\n  Suggestion:\n    return count;", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u001b", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnknownLanguageTintsWholeCodeLines()
+    {
+        var diff = string.Join('\n',
+        [
+            "diff --git a/notes/readme.txt b/notes/readme.txt",
+            "--- a/notes/readme.txt",
+            "+++ b/notes/readme.txt",
+            "@@ -1,1 +1,1 @@",
+            "+if (ready)"
+        ]);
+        var text = Render(color: true, diff: diff, comments:
+        [
+            Comment("notes/readme.txt", 1, 1, "low", "style", "Say what is ready.", "return true;")
+        ]);
+
+        Assert.Contains("    \u001b[90m1 | \u001b[0m\u001b[36mif (ready)\u001b[0m", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[36mreturn true;\u001b[0m", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u001b[94m", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SuggestionColorDoesNotInheritAnOpenComment()
+    {
+        var diff = string.Join('\n',
+        [
+            "diff --git a/src/App.cs b/src/App.cs",
+            "--- a/src/App.cs",
+            "+++ b/src/App.cs",
+            "@@ -1,1 +1,1 @@",
+            "+/* unfinished"
+        ]);
+        var text = Render(color: true, diff: diff, comments:
+        [
+            Comment("src/App.cs", 1, 1, "medium", "maintainability", "Close the comment.", "int x = 1;")
+        ]);
+
+        Assert.Contains("    \u001b[90m1 | \u001b[0m\u001b[90m/* unfinished\u001b[0m", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[94mint\u001b[0m x = \u001b[33m1\u001b[0m;", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ColorDimsTheOmittedLineCount()
+    {
+        var body = new List<string>
+        {
+            "diff --git a/src/Long.cs b/src/Long.cs",
+            "--- a/src/Long.cs",
+            "+++ b/src/Long.cs",
+            "@@ -0,0 +1,25 @@"
+        };
+        for (var i = 1; i <= 25; i++)
+            body.Add($"+line-{i}");
+
+        var text = Render(color: true, diff: string.Join('\n', body), comments:
+        [
+            Comment("src/Long.cs", 1, 25, "medium", "maintainability", "This function is too long.")
+        ]);
+
+        Assert.Contains("\u001b[90m... 5 more lines\u001b[0m", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[90m 1 | \u001b[0mline-\u001b[33m1\u001b[0m", text, StringComparison.Ordinal);
     }
 
     [Fact]

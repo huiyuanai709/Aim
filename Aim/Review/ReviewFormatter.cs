@@ -10,6 +10,11 @@ internal static class ReviewFormatter
     private const string CriticalOrHigh = "\u001b[1;91m";
     private const string Medium = "\u001b[33m";
     private const string Low = "\u001b[2;36m";
+    private const string PathStyle = "\u001b[1;36m";
+    private const string LineStyle = "\u001b[1m";
+    private const string CategoryStyle = "\u001b[35m";
+    private const string LabelStyle = "\u001b[1;36m";
+    private const string GutterStyle = "\u001b[90m";
 
     public static string ToJson(IReadOnlyList<ReviewComment> comments)
     {
@@ -75,26 +80,63 @@ internal static class ReviewFormatter
         var lines = comment.StartLine == comment.EndLine
             ? comment.StartLine.ToString(CultureInfo.InvariantCulture)
             : $"{comment.StartLine.ToString(CultureInfo.InvariantCulture)}-{comment.EndLine.ToString(CultureInfo.InvariantCulture)}";
-        sb.Append(comment.Path);
+        AppendStyled(sb, comment.Path, PathStyle, color);
         sb.Append(':');
-        sb.Append(lines);
+        AppendStyled(sb, lines, LineStyle, color);
         sb.Append("  ");
         AppendSeverity(sb, comment.Severity, color);
         sb.Append("  ");
-        sb.AppendLine(comment.Category);
+        AppendStyled(sb, comment.Category, CategoryStyle, color);
+        sb.AppendLine();
 
         foreach (var line in comment.Content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
             sb.AppendLine($"  {line}");
 
         if (includeSnippets)
-            AppendSnippet(sb, comment, index, workingDirectory, revision, ref repoRoot);
+            AppendSnippet(sb, comment, color, index, workingDirectory, revision, ref repoRoot);
 
         if (string.IsNullOrWhiteSpace(comment.SuggestionCode))
             return;
 
-        sb.AppendLine("  Suggestion:");
+        AppendLabel(sb, "Suggestion:", color);
+        var suggestion = default(ReviewHighlighter.State);
         foreach (var line in comment.SuggestionCode.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
-            sb.AppendLine($"    {line}");
+        {
+            sb.Append("    ");
+            AppendCode(sb, line, comment.Path, color, ref suggestion);
+            sb.AppendLine();
+        }
+    }
+
+    private static void AppendStyled(StringBuilder sb, string text, string style, bool color)
+    {
+        if (!color || text.Length == 0)
+        {
+            sb.Append(text);
+            return;
+        }
+
+        sb.Append(style);
+        sb.Append(text);
+        sb.Append(Reset);
+    }
+
+    private static void AppendLabel(StringBuilder sb, string label, bool color)
+    {
+        sb.Append("  ");
+        AppendStyled(sb, label, LabelStyle, color);
+        sb.AppendLine();
+    }
+
+    private static void AppendCode(StringBuilder sb, string text, string path, bool color, ref ReviewHighlighter.State state)
+    {
+        if (!color)
+        {
+            sb.Append(text);
+            return;
+        }
+
+        ReviewHighlighter.Append(sb, text, path, ref state);
     }
 
     private static void AppendSeverity(StringBuilder sb, string severity, bool color)
@@ -122,6 +164,7 @@ internal static class ReviewFormatter
     private static void AppendSnippet(
         StringBuilder sb,
         ReviewComment comment,
+        bool color,
         ReviewCodeIndex index,
         string? workingDirectory,
         string? revision,
@@ -144,25 +187,49 @@ internal static class ReviewFormatter
         if (!found || lines.Count == 0)
             return;
 
-        sb.AppendLine("  Code:");
+        AppendLabel(sb, "Code:", color);
         var width = 1;
         foreach (var line in lines)
             width = Math.Max(width, line.Number.ToString(CultureInfo.InvariantCulture).Length);
 
+        var code = default(ReviewHighlighter.State);
         foreach (var line in lines)
         {
             sb.Append("    ");
-            sb.Append(line.Number.ToString(CultureInfo.InvariantCulture).PadLeft(width));
-            sb.Append(" | ");
-            sb.AppendLine(line.Text);
+            var number = line.Number.ToString(CultureInfo.InvariantCulture).PadLeft(width);
+            AppendGutter(sb, number, color);
+            AppendCode(sb, line.Text, comment.Path, color, ref code);
+            sb.AppendLine();
         }
 
         if (omitted > 0 && CoversPrintedWindow(lines, comment.StartLine))
         {
-            sb.Append("    ... ");
+            sb.Append("    ");
+            var more = omitted == 1 ? " more line" : " more lines";
+            if (color)
+                sb.Append(GutterStyle);
+            sb.Append("... ");
             sb.Append(omitted.ToString(CultureInfo.InvariantCulture));
-            sb.AppendLine(omitted == 1 ? " more line" : " more lines");
+            sb.Append(more);
+            if (color)
+                sb.Append(Reset);
+            sb.AppendLine();
         }
+    }
+
+    private static void AppendGutter(StringBuilder sb, string number, bool color)
+    {
+        if (!color)
+        {
+            sb.Append(number);
+            sb.Append(" | ");
+            return;
+        }
+
+        sb.Append(GutterStyle);
+        sb.Append(number);
+        sb.Append(" | ");
+        sb.Append(Reset);
     }
 
     private static bool CoversPrintedWindow(List<ReviewSnippetLine> lines, int start)
