@@ -5,16 +5,22 @@ namespace Aim;
 /// <summary>
 /// Tiny line tokenizer for review snippets. Keyword sets and a scan are enough;
 /// there is no regex compilation and no reflection, so it stays trim/AOT friendly.
-/// Unknown extensions get one mild color instead of token colors.
+/// Unknown and extension-less paths are not wrapped in one color. Strings and
+/// numbers are still tinted; keywords and comments stay plain unless the path
+/// resolves to a language.
 /// </summary>
 internal static class ReviewHighlighter
 {
     private const string Reset = "\u001b[0m";
-    private const string KeywordColor = "\u001b[94m";
-    private const string StringColor = "\u001b[32m";
-    private const string CommentColor = "\u001b[90m";
-    private const string NumberColor = "\u001b[33m";
-    private const string UnknownColor = "\u001b[36m";
+
+    // Bright hues plus weight, so the four token classes stay apart from each
+    // other, from plain identifiers, and from the formatter chrome (gray gutter,
+    // dim yellow "medium", cyan paths).
+    private const string KeywordColor = "\u001b[1;95m";
+    private const string StringColor = "\u001b[92m";
+    private const string CommentColor = "\u001b[3;90m";
+    private const string NumberColor = "\u001b[93m";
+    private const string MemberColor = "\u001b[96m";
 
     [Flags]
     private enum Features
@@ -56,6 +62,7 @@ internal static class ReviewHighlighter
     {
         public required Features Features { get; init; }
         public HashSet<string>? Keywords { get; init; }
+        public bool ColorMembers { get; init; }
     }
 
     private const Features CFamily =
@@ -112,6 +119,16 @@ internal static class ReviewHighlighter
     private static readonly Language Yaml = Make(
         Features.HashComment | Features.DoubleQuote | Features.SingleQuote,
         Words("true false null yes no"));
+
+    private static readonly Language Dockerfile = Make(
+        Features.HashComment | Features.DoubleQuote | Features.SingleQuote,
+        WordsIgnoreCase("from as run cmd entrypoint copy add env arg workdir expose volume user label healthcheck shell stopsignal onbuild maintainer"));
+
+    // No keyword or comment rules: a whole line must not become one tint.
+    private static readonly Language Generic = Make(
+        Features.DoubleQuote,
+        keywords: null,
+        colorMembers: false);
 
     private static readonly Language Css = Make(
         Features.BlockComment | Features.DoubleQuote | Features.SingleQuote | Features.AtRules,
@@ -189,17 +206,7 @@ internal static class ReviewHighlighter
 
     internal static void Append(StringBuilder sb, string text, string path, ref State state)
     {
-        if (!ByExtension.TryGetValue(Path.GetExtension(path), out var language))
-        {
-            if (text.Length == 0)
-                return;
-
-            sb.Append(UnknownColor);
-            sb.Append(text);
-            sb.Append(Reset);
-            return;
-        }
-
+        var language = LanguageFor(path);
         var i = 0;
         if (state.Open != SpanKind.None)
         {
@@ -287,6 +294,20 @@ internal static class ReviewHighlighter
                 sb.Append(text, i, nameStart - i);
                 Emit(sb, KeywordColor, text.AsSpan(nameStart, nameEnd - nameStart));
                 i = tagEnd;
+                continue;
+            }
+
+            if (language.ColorMembers &&
+                text[i] == '.' &&
+                (i == 0 || text[i - 1] != '.') &&
+                i + 1 < text.Length &&
+                IsIdentStart(text[i + 1]))
+            {
+                var start = i;
+                i += 2;
+                while (i < text.Length && IsIdentPart(text[i]))
+                    i++;
+                Emit(sb, MemberColor, text.AsSpan(start, i - start));
                 continue;
             }
 
@@ -644,10 +665,110 @@ internal static class ReviewHighlighter
         sb.Append(Reset);
     }
 
-    private static Language Make(Features features, HashSet<string>? keywords) => new()
+    private static Language LanguageFor(string path)
+    {
+        var cleaned = CleanPath(path);
+        var extension = Path.GetExtension(cleaned);
+        if (extension.Length != 0 && ByExtension.TryGetValue(extension, out var byExtension))
+            return byExtension;
+
+        if (IsDockerfileName(Path.GetFileName(cleaned)))
+            return Dockerfile;
+
+        return Generic;
+    }
+
+    private static bool IsDockerfileName(string name) =>
+        name.Equals("Dockerfile", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("Containerfile", StringComparison.OrdinalIgnoreCase) ||
+        name.StartsWith("Dockerfile.", StringComparison.OrdinalIgnoreCase) ||
+        name.StartsWith("Containerfile.", StringComparison.OrdinalIgnoreCase);
+
+    private static string CleanPath(string path)
+    {
+        var text = path.Trim();
+        if (text.Length >= 2)
+        {
+            var quote = text[0];
+            if (quote is '"' or '\'' or '`' && text[^1] == quote)
+                text = text[1..^1].Trim();
+        }
+
+        while (TryStripLocation(text, out var stripped))
+            text = stripped;
+
+        return text;
+    }
+
+    private static bool TryStripLocation(string text, out string stripped)
+    {
+        if (TryStripMarker(text, '#', out stripped) || TryStripMarker(text, ':', out stripped))
+            return true;
+
+        if (text.Length > 2 && text[^1] == ')')
+        {
+            var open = text.LastIndexOf('(');
+            if (open > 0 && IsLineSpan(text.AsSpan(open + 1, text.Length - open - 2)))
+            {
+                stripped = text[..open].TrimEnd();
+                return stripped.Length > 0;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryStripMarker(string text, char marker, out string stripped)
+    {
+        stripped = text;
+        var index = text.LastIndexOf(marker);
+        if (index <= 0)
+            return false;
+
+        var tail = text.AsSpan(index + 1);
+        if (tail.Length > 1 && tail[0] is 'L' or 'l' && char.IsAsciiDigit(tail[1]))
+            tail = tail[1..];
+
+        if (!IsLineSpan(tail))
+            return false;
+
+        stripped = text[..index].TrimEnd();
+        return stripped.Length > 0;
+    }
+
+    private static bool IsLineSpan(ReadOnlySpan<char> text)
+    {
+        if (text.Length == 0)
+            return false;
+
+        var i = 0;
+        if (!ConsumeDigits(text, ref i))
+            return false;
+
+        if (i == text.Length)
+            return true;
+
+        if (text[i] != '-')
+            return false;
+
+        i++;
+        return ConsumeDigits(text, ref i) && i == text.Length;
+    }
+
+    private static bool ConsumeDigits(ReadOnlySpan<char> text, ref int i)
+    {
+        var start = i;
+        while (i < text.Length && char.IsAsciiDigit(text[i]))
+            i++;
+
+        return i > start;
+    }
+
+    private static Language Make(Features features, HashSet<string>? keywords, bool colorMembers = true) => new()
     {
         Features = features,
-        Keywords = keywords
+        Keywords = keywords,
+        ColorMembers = colorMembers
     };
 
     private static HashSet<string> Words(string text) =>
