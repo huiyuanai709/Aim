@@ -26,7 +26,7 @@ public class ReviewFormatterTests
         Assert.Contains("\u001b[1;36mlib/Mid.cs\u001b[0m:\u001b[1m4\u001b[0m  \u001b[33mmedium\u001b[0m  \u001b[35mperformance\u001b[0m", text, StringComparison.Ordinal);
         Assert.Contains("\u001b[1;36mlib/Mid.cs\u001b[0m:\u001b[1m8\u001b[0m  \u001b[1;91mcritical\u001b[0m  \u001b[35msecurity\u001b[0m", text, StringComparison.Ordinal);
         Assert.Contains("src/App.cs", text, StringComparison.Ordinal);
-        Assert.Contains("    \u001b[90m11 | \u001b[0m\u001b[94mnew\u001b[0m line", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[90m11 | \u001b[0m\u001b[1;95mnew\u001b[0m line", text, StringComparison.Ordinal);
         Assert.Contains("\u001b[1;36mCode:\u001b[0m", text, StringComparison.Ordinal);
         Assert.DoesNotContain("\u001b[1;91mbug", text, StringComparison.Ordinal);
 
@@ -52,10 +52,10 @@ public class ReviewFormatterTests
         ]);
 
         Assert.Contains("  \u001b[1;36mCode:\u001b[0m", text, StringComparison.Ordinal);
-        Assert.Contains("    \u001b[90m1 | \u001b[0m\u001b[94mif\u001b[0m (count > \u001b[33m0\u001b[0m) \u001b[90m// ready\u001b[0m", text, StringComparison.Ordinal);
-        Assert.Contains("    \u001b[90m2 | \u001b[0m    \u001b[94mreturn\u001b[0m \u001b[32m\"ok\"\u001b[0m;", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[90m1 | \u001b[0m\u001b[1;95mif\u001b[0m (count > \u001b[93m0\u001b[0m) \u001b[3;90m// ready\u001b[0m", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[90m2 | \u001b[0m    \u001b[1;95mreturn\u001b[0m \u001b[92m\"ok\"\u001b[0m;", text, StringComparison.Ordinal);
         Assert.Contains("  \u001b[1;36mSuggestion:\u001b[0m", text, StringComparison.Ordinal);
-        Assert.Contains("    \u001b[94mreturn\u001b[0m count;", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[1;95mreturn\u001b[0m count;", text, StringComparison.Ordinal);
         Assert.Contains("\n1 comment. Line numbers refer to the new file and are best-effort (not relocated).", text, StringComparison.Ordinal);
     }
 
@@ -81,7 +81,7 @@ public class ReviewFormatterTests
     }
 
     [Fact]
-    public void UnknownLanguageTintsWholeCodeLines()
+    public void UnknownLanguageDoesNotTintWholeCodeLines()
     {
         var diff = string.Join('\n',
         [
@@ -96,9 +96,11 @@ public class ReviewFormatterTests
             Comment("notes/readme.txt", 1, 1, "low", "style", "Say what is ready.", "return true;")
         ]);
 
-        Assert.Contains("    \u001b[90m1 | \u001b[0m\u001b[36mif (ready)\u001b[0m", text, StringComparison.Ordinal);
-        Assert.Contains("    \u001b[36mreturn true;\u001b[0m", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("\u001b[94m", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[90m1 | \u001b[0mif (ready)\n", text, StringComparison.Ordinal);
+        Assert.Contains("    return true;\n", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u001b[36mif (ready)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u001b[36mreturn true;", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u001b[1;95m", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -117,8 +119,8 @@ public class ReviewFormatterTests
             Comment("src/App.cs", 1, 1, "medium", "maintainability", "Close the comment.", "int x = 1;")
         ]);
 
-        Assert.Contains("    \u001b[90m1 | \u001b[0m\u001b[90m/* unfinished\u001b[0m", text, StringComparison.Ordinal);
-        Assert.Contains("    \u001b[94mint\u001b[0m x = \u001b[33m1\u001b[0m;", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[90m1 | \u001b[0m\u001b[3;90m/* unfinished\u001b[0m", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[1;95mint\u001b[0m x = \u001b[93m1\u001b[0m;", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -140,7 +142,7 @@ public class ReviewFormatterTests
         ]);
 
         Assert.Contains("\u001b[90m... 5 more lines\u001b[0m", text, StringComparison.Ordinal);
-        Assert.Contains("    \u001b[90m 1 | \u001b[0mline-\u001b[33m1\u001b[0m", text, StringComparison.Ordinal);
+        Assert.Contains("    \u001b[90m 1 | \u001b[0mline-\u001b[93m1\u001b[0m", text, StringComparison.Ordinal);
     }
 
     [Fact]
