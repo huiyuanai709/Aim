@@ -69,7 +69,7 @@ internal static class ReviewPrompt
 
         if (input.AgentTools)
         {
-            sb.AppendLine("You can call file_read and code_search to inspect the repository. Your final message must still be only the JSON array.");
+            sb.AppendLine("You can call file_read and code_search to inspect the repository. Before each meaningful step, call report_progress with a half-sentence of plain language. Your final message must still be only the JSON array.");
         }
 
         if (!string.IsNullOrWhiteSpace(input.GroupLabel))
@@ -110,6 +110,7 @@ internal static class ReviewPrompt
         var sb = new StringBuilder();
         sb.AppendLine("You review a git diff for Aim. You may call file_read and code_search before you answer.");
         sb.AppendLine("file_read returns one repository file. code_search finds a fixed string with git grep. Neither tool submits a comment.");
+        sb.AppendLine("Before you start a meaningful step (reading files, searching, loading a skill, or writing the final findings), call report_progress with a half-sentence of plain language. Match the language of the code, its comments, and the user context. Do not assume Chinese or English. report_progress only prints that status and does not submit a comment.");
         if (skills)
             sb.AppendLine("Advertised skills can be loaded with load_skill, their files read with read_skill_resource, and their .py, .sh, .js, .cs, or .csx scripts run with run_skill_script.");
         if (nameOnly)

@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json;
+using Microsoft.Extensions.AI;
 using Aim;
 
 namespace Aim.Tests;
@@ -112,6 +114,125 @@ public class ReviewToolsTests
         Assert.Contains("more lines omitted", result);
         Assert.Contains("▶ code_search", progress.ToString());
         Assert.Equal("No matches.", tools.CodeSearch("this-string-is-absent", "notes.txt"));
+    }
+
+    [Fact]
+    public void CreateFunctionsRegistersReportProgress()
+    {
+        var tools = new ReviewTools(Environment.CurrentDirectory, revision: null, maxChars: 4_000, TextWriter.Null);
+        var functions = tools.CreateFunctions();
+        var names = functions.Select(function => function.Name).ToList();
+
+        Assert.Contains("file_read", names);
+        Assert.Contains("code_search", names);
+        Assert.Contains("report_progress", names);
+        Assert.Equal(3, names.Count);
+
+        var progress = Assert.Single(functions, function => function.Name == "report_progress");
+        Assert.Contains("does not submit a review comment", progress.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("message", progress.JsonSchema.ToString());
+    }
+
+    [Fact]
+    public async Task ReportProgressAcceptsTheJsonArgumentTheAgentSends()
+    {
+        var progress = new StringWriter();
+        var tools = new ReviewTools(Environment.CurrentDirectory, revision: null, maxChars: 4_000, progress);
+        var function = Assert.Single(tools.CreateFunctions(), candidate => candidate.Name == "report_progress");
+        using var document = JsonDocument.Parse("""{"message":"Reading the handler"}""");
+        var arguments = new AIFunctionArguments();
+        foreach (var property in document.RootElement.EnumerateObject())
+            arguments[property.Name] = property.Value.Clone();
+
+        var result = await function.InvokeAsync(arguments);
+
+        var returned = Assert.IsType<JsonElement>(result);
+        Assert.Equal("Noted. This does not submit a review comment.", returned.GetString());
+        Assert.Equal("▶ report_progress Reading the handler" + Environment.NewLine, progress.ToString());
+    }
+
+    [Fact]
+    public void ReportProgressPrintsOneStatusLine()
+    {
+        var progress = new StringWriter();
+        var tools = new ReviewTools(Environment.CurrentDirectory, revision: null, maxChars: 4_000, progress);
+
+        var result = tools.ReportProgress("Reading the payment handler");
+
+        Assert.Equal("▶ report_progress Reading the payment handler" + Environment.NewLine, progress.ToString());
+        Assert.Equal("Noted. This does not submit a review comment.", result);
+        Assert.DoesNotContain("start_line", result, StringComparison.Ordinal);
+
+        progress.GetStringBuilder().Clear();
+        tools.ReportProgress("正在阅读支付处理");
+        Assert.Equal("▶ report_progress 正在阅读支付处理" + Environment.NewLine, progress.ToString());
+    }
+
+    [Fact]
+    public void ReportProgressCollapsesNewlinesStripsControlsAndCapsLength()
+    {
+        var progress = new StringWriter();
+        var tools = new ReviewTools(Environment.CurrentDirectory, revision: null, maxChars: 4_000, progress);
+
+        var collapsed = tools.ReportProgress("Reading files\r\n\r\nsearching\tcallers");
+        Assert.Equal("▶ report_progress Reading files searching callers" + Environment.NewLine, progress.ToString());
+        Assert.Equal("Noted. This does not submit a review comment.", collapsed);
+
+        progress.GetStringBuilder().Clear();
+        var noisy = tools.ReportProgress("Status\u001b[31m ok\u0000\u202e");
+        var noisyLine = progress.ToString();
+        Assert.DoesNotContain("\u001b", noisyLine, StringComparison.Ordinal);
+        Assert.DoesNotContain("\0", noisyLine, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u202e", noisyLine, StringComparison.Ordinal);
+        Assert.Equal("▶ report_progress Status [31m ok" + Environment.NewLine, noisyLine);
+        Assert.Equal("Noted. This does not submit a review comment.", noisy);
+
+        progress.GetStringBuilder().Clear();
+        var longMessage = "Reading " + new string('a', 400);
+        tools.ReportProgress(longMessage);
+        var written = progress.ToString().Replace("\r\n", "\n", StringComparison.Ordinal);
+        var line = Assert.Single(written.Split('\n', StringSplitOptions.RemoveEmptyEntries));
+        Assert.StartsWith("▶ report_progress Reading ", line, StringComparison.Ordinal);
+        var status = line["▶ report_progress ".Length..];
+        Assert.Equal(ReviewTools.MaxProgressChars, status.Length);
+        Assert.EndsWith("...", status, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReportProgressRejectsABlankStatus()
+    {
+        var progress = new StringWriter();
+        var tools = new ReviewTools(Environment.CurrentDirectory, revision: null, maxChars: 4_000, progress);
+
+        var result = tools.ReportProgress(" \r\n\t");
+
+        Assert.Equal("▶ report_progress (rejected)" + Environment.NewLine, progress.ToString());
+        Assert.Equal("Status must be one short line of plain text. This does not submit a review comment.", result);
+    }
+
+    [Fact]
+    public void ParallelReportProgressDoesNotInterleaveLines()
+    {
+        var inner = new StringWriter();
+        var progress = new LockedTextWriter(inner);
+        var tools = new ReviewTools(Environment.CurrentDirectory, revision: null, maxChars: 4_000, progress);
+        var messages = Enumerable.Range(0, 32)
+            .Select(i => new string((char)('A' + (i % 26)), 40) + i.ToString("00"))
+            .ToArray();
+
+        Parallel.For(0, messages.Length, i => tools.ReportProgress(messages[i]));
+
+        var lines = inner.ToString()
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(messages.Length, lines.Length);
+        foreach (var line in lines)
+        {
+            Assert.StartsWith("▶ report_progress ", line, StringComparison.Ordinal);
+            var body = line["▶ report_progress ".Length..];
+            Assert.Contains(body, messages);
+        }
     }
 
     private sealed class TempRepo : IDisposable

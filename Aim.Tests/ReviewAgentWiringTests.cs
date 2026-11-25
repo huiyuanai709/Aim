@@ -8,7 +8,7 @@ namespace Aim.Tests;
 public class ReviewAgentWiringTests
 {
     [Fact]
-    public void CreateRegistersTheTwoToolsAndTheRoundCap()
+    public void CreateRegistersTheReviewToolsAndTheRoundCap()
     {
         var agent = ReviewAgent.Create(new ReviewAgentRequest
         {
@@ -30,8 +30,11 @@ public class ReviewAgentWiringTests
         var names = RegisteredToolNames(agent);
         Assert.Contains("file_read", names);
         Assert.Contains("code_search", names);
-        Assert.Equal(2, names.Count);
+        Assert.Contains("report_progress", names);
+        Assert.Equal(3, names.Count);
         Assert.Contains("file_read", agent.Instructions);
+        Assert.Contains("report_progress", agent.Instructions);
+        Assert.Contains("half-sentence", agent.Instructions);
         Assert.DoesNotContain("load_skill", agent.Instructions);
         Assert.Equal("aim-review", agent.Name);
         Assert.Null(agent.AIContextProviders);
@@ -71,7 +74,9 @@ public class ReviewAgentWiringTests
                 var names = RegisteredToolNames(agent);
                 Assert.Contains("file_read", names);
                 Assert.Contains("code_search", names);
-                Assert.Equal(2, names.Count);
+                Assert.Contains("report_progress", names);
+                Assert.Equal(3, names.Count);
+                Assert.Contains("report_progress", agent.Instructions);
             }
             finally
             {

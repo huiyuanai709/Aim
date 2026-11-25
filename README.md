@@ -15,7 +15,7 @@ AIM is a command-line tool that leverages AI to generate meaningful, semantic co
 - 🔄 **Auto-commit**: Optional automatic commit after message generation
 - 📝 **Amend Support**: Generate messages for amending previous commits
 - 🔍 **Diff review**: `aim review` prints line comments for staged changes, a triple-dot range, the current branch against the default branch, or one commit. Large diffs are split into directory groups and reviewed together
-- 🛠️ **Optional review agent**: `--agent` can read files and search the repo before it answers. Off unless you ask for it
+- 🛠️ **Optional review agent**: `--agent` can read files, search the repo, and print a short status before it answers. Off unless you ask for it
 - 🎨 **Clean Output**: Beautiful, readable console output
 
 ## 🚀 Quick Start
@@ -102,7 +102,7 @@ Review a diff and print AI line comments. The default input is staged changes (`
 - `--rule <file>`: extra rules text, appended to the built-in checklist.
 - `--background "..."`: extra product context for the model.
 - `--format text|json`: human-readable text (default) or a JSON array of comments.
-- `--agent`: opt in to a Microsoft Agent Framework review agent (`ChatClientAgent`) that may call `file_read` and `code_search`, and load file-based skills, before the final answer. Off by default. The final answer is still the same JSON comment array.
+- `--agent`: opt in to a Microsoft Agent Framework review agent (`ChatClientAgent`) that may call `file_read`, `code_search`, and `report_progress`, and load file-based skills, before the final answer. Off by default. The final answer is still the same JSON comment array.
 - `--max-rounds <n>`: cap agent tool rounds (1–40). Overrides `maxreviewrounds`. Without `--agent`, a valid value is ignored after a note on stderr.
 - `--concurrency <n>`: how many groups to review at the same time when a diff is split (1–32). Default: `8`, or `reviewconcurrency`.
 - `--timeout <minutes>`: how long to wait for each review call, in minutes (1–60). Default: `5`, or `reviewtimeoutminutes`. This also raises the HTTP timeout. Without it, the OpenAI client stops a call at about 100 seconds.
@@ -123,12 +123,13 @@ Comments from every finished group are combined. Duplicates are removed. `maxrev
 
 Each comment has `path`, `start_line`, `end_line`, `severity` (`critical`, `high`, `medium`, `low`), `category` (`bug`, `security`, `performance`, `maintainability`, `style`, `other`), `content`, and an optional `suggestion_code`. At most `maxreviewcomments` comments are printed (default 20). Set `reviewmodel` when review should use a different model than `model`.
 
-With `--agent`, each group gets its own agent. A one-call review still uses one agent. The agent may call two tools before that JSON array:
+With `--agent`, each group gets its own agent. A one-call review still uses one agent. The agent may call these tools before that JSON array:
 
 - `file_read` reads a repo-relative file. For `--commit` or `--first-commit`, it uses `git show` of that commit. For `--from`/`--to` or `--branch`, it uses `git show` of the head ref (`--to`, or `HEAD` for `--branch`). A staged review reads the working tree. Paths must stay inside the repository. A read returns at most 200 lines.
 - `code_search` runs `git grep` for a fixed string (not a shell command and not a regular expression) and returns at most 80 lines.
+- `report_progress` prints one short status line on stderr and returns immediately. It does not submit a review comment, and each call uses one agent round. The agent is instructed to call it with a half-sentence of plain language before reading files, searching, loading a skill, or writing the final findings. The wording follows the code, its comments, and the user context. A long or multiline message is collapsed to a single line and capped.
 
-Tool progress is printed on stderr (`▶ file_read …`, `▶ code_search …`). Tool text is truncated to `maxtoolresultchars` (default 12000). Agent rounds default to `maxreviewrounds` (10).
+Tool progress is printed on stderr (`▶ file_read …`, `▶ code_search …`, `▶ report_progress …`). When several groups run at once, those lines share one locked stderr writer so they do not tear. Tool text is truncated to `maxtoolresultchars` (default 12000). Agent rounds default to `maxreviewrounds` (10). `report_progress` is a status line, separate from that tool-text cap.
 
 With `--agent`, Aim also registers a Microsoft Agent Framework `AgentSkillsProvider` when it finds skill directories. Discovery order is:
 
