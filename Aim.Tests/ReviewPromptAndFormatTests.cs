@@ -33,6 +33,7 @@ public class ReviewPromptAndFormatTests
         Assert.Contains("was truncated", prompt);
         Assert.Contains("suggestion_code", prompt);
         Assert.DoesNotContain("file_read", prompt);
+        Assert.DoesNotContain("report_progress", prompt);
     }
 
     [Fact]
@@ -50,22 +51,31 @@ public class ReviewPromptAndFormatTests
 
         Assert.Contains("file_read", prompt);
         Assert.Contains("code_search", prompt);
+        Assert.Contains("report_progress", prompt);
+        Assert.Contains("half-sentence", prompt);
         Assert.Contains("only the JSON array", prompt);
         Assert.DoesNotContain("one group of a larger change", prompt);
 
         var instructions = ReviewPrompt.AgentInstructions(nameOnly: false);
         Assert.Contains("file_read", instructions);
         Assert.Contains("code_search", instructions);
+        Assert.Contains("report_progress", instructions);
+        Assert.Contains("half-sentence", instructions);
+        Assert.Contains("reading files, searching, loading a skill, or writing the final findings", instructions);
+        Assert.Contains("Do not assume Chinese or English", instructions);
+        Assert.Contains("does not submit a comment", instructions);
         Assert.Contains("JSON array", instructions);
         Assert.DoesNotContain("Only file names", instructions);
 
         var nameOnly = ReviewPrompt.AgentInstructions(nameOnly: true);
         Assert.Contains("file_read", nameOnly);
+        Assert.Contains("report_progress", nameOnly);
         Assert.Contains("file names only", nameOnly);
         Assert.DoesNotContain("load_skill", nameOnly);
 
         var withSkills = ReviewPrompt.AgentInstructions(nameOnly: false, skills: true);
         Assert.Contains("load_skill", withSkills);
+        Assert.Contains("report_progress", withSkills);
         Assert.Contains("read_skill_resource", withSkills);
         Assert.Contains("run_skill_script", withSkills);
     }

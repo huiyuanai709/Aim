@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
@@ -10,6 +11,7 @@ internal sealed class ReviewTools
 {
     public const int MaxReadLines = 200;
     public const int MaxSearchLines = 80;
+    public const int MaxProgressChars = 120;
 
     private readonly string _workingDirectory;
     private readonly string? _revision;
@@ -28,11 +30,11 @@ internal sealed class ReviewTools
     [UnconditionalSuppressMessage(
         "Trimming",
         "IL2026:RequiresUnreferencedCode",
-        Justification = "file_read and code_search arguments are string, int, and int?, registered on ReviewToolJsonContext.")]
+        Justification = "file_read, code_search, and report_progress arguments are string, int, and int?, registered on ReviewToolJsonContext.")]
     [UnconditionalSuppressMessage(
         "AOT",
         "IL3050:RequiresDynamicCode",
-        Justification = "file_read and code_search arguments are string, int, and int?, registered on ReviewToolJsonContext.")]
+        Justification = "file_read, code_search, and report_progress arguments are string, int, and int?, registered on ReviewToolJsonContext.")]
     public IReadOnlyList<AIFunction> CreateFunctions()
     {
         var serializer = new JsonSerializerOptions(ReviewToolJsonContext.Default.Options)
@@ -55,7 +57,15 @@ internal sealed class ReviewTools
                 Description = "Search tracked repository files for a fixed string with git grep. Not a regular expression. Optional repo-relative path limits the search.",
                 SerializerOptions = serializer
             });
-        return [fileRead, codeSearch];
+        AIFunction reportProgress = AIFunctionFactory.Create(
+            ReportProgress,
+            new AIFunctionFactoryOptions
+            {
+                Name = "report_progress",
+                Description = "Print one short status line for the person watching this review. Call it before reading files, searching, loading a skill, or writing the final findings. Use a half-sentence of plain language. Does not submit a review comment.",
+                SerializerOptions = serializer
+            });
+        return [fileRead, codeSearch, reportProgress];
     }
 
     internal string FileRead(
@@ -65,12 +75,12 @@ internal sealed class ReviewTools
     {
         if (!TryPreparePath(path, out var relative, out var fullPath, out var root, out var error))
         {
-            _progress.WriteLine("▶ file_read (rejected)");
+            WriteProgress("▶ file_read (rejected)");
             return error;
         }
 
         var window = FormatWindow(start_line, end_line);
-        _progress.WriteLine(window.Length == 0 ? $"▶ file_read {relative}" : $"▶ file_read {relative}:{window}");
+        WriteProgress(window.Length == 0 ? $"▶ file_read {relative}" : $"▶ file_read {relative}:{window}");
 
         string text;
         if (_revision is not null)
@@ -108,7 +118,7 @@ internal sealed class ReviewTools
     {
         if (string.IsNullOrWhiteSpace(query) || query.Contains('\0') || query.Length > 200)
         {
-            _progress.WriteLine("▶ code_search (rejected)");
+            WriteProgress("▶ code_search (rejected)");
             return "Query must be a non-empty fixed string of at most 200 characters.";
         }
 
@@ -117,21 +127,21 @@ internal sealed class ReviewTools
         {
             if (!TryPreparePath(path, out relative, out _, out _, out var pathError))
             {
-                _progress.WriteLine("▶ code_search (rejected)");
+                WriteProgress("▶ code_search (rejected)");
                 return pathError;
             }
         }
 
         if (!TryRoot(out var root, out var rootError))
         {
-            _progress.WriteLine("▶ code_search (rejected)");
+            WriteProgress("▶ code_search (rejected)");
             return rootError;
         }
 
         var preview = query.Replace('\r', ' ').Replace('\n', ' ').Trim();
         if (preview.Length > 80)
             preview = preview[..80] + "...";
-        _progress.WriteLine(relative is null ? $"▶ code_search {preview}" : $"▶ code_search {preview} {relative}");
+        WriteProgress(relative is null ? $"▶ code_search {preview}" : $"▶ code_search {preview} {relative}");
 
         var args = new List<string> { "grep", "-n", "-I", "-F", "--full-name", "-e", query };
         if (_revision is not null)
@@ -150,6 +160,98 @@ internal sealed class ReviewTools
         }
 
         return ClipLines(output, MaxSearchLines, "search");
+    }
+
+    internal string ReportProgress(
+        [Description("One short status sentence. Plain language, matching the code, its comments, and the user context.")] string message)
+    {
+        if (!TrySanitizeProgress(message, out var status))
+        {
+            WriteProgress("▶ report_progress (rejected)");
+            return "Status must be one short line of plain text. This does not submit a review comment.";
+        }
+
+        WriteProgress($"▶ report_progress {status}");
+        return "Noted. This does not submit a review comment.";
+    }
+
+    private void WriteProgress(string line)
+    {
+        _progress.WriteLine(line);
+        _progress.Flush();
+    }
+
+    private static bool TrySanitizeProgress(string? message, out string status)
+    {
+        status = "";
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        var sb = new StringBuilder(Math.Min(message.Length, MaxProgressChars));
+        var pendingSpace = false;
+        var truncated = false;
+        foreach (var rune in message.EnumerateRunes())
+        {
+            if (!IsProgressRune(rune))
+            {
+                if (sb.Length > 0)
+                    pendingSpace = true;
+                continue;
+            }
+
+            var text = rune.ToString();
+            var extra = pendingSpace ? 1 : 0;
+            if (sb.Length + extra + text.Length > MaxProgressChars)
+            {
+                truncated = true;
+                break;
+            }
+
+            if (pendingSpace)
+            {
+                sb.Append(' ');
+                pendingSpace = false;
+            }
+
+            sb.Append(text);
+        }
+
+        if (sb.Length == 0)
+            return false;
+
+        if (truncated)
+        {
+            const string ellipsis = "...";
+            var keep = MaxProgressChars - ellipsis.Length;
+            if (sb.Length > keep)
+            {
+                sb.Length = keep;
+                if (sb.Length > 0 && char.IsHighSurrogate(sb[^1]))
+                    sb.Length--;
+                while (sb.Length > 0 && sb[^1] == ' ')
+                    sb.Length--;
+            }
+
+            if (sb.Length == 0)
+                return false;
+
+            sb.Append(ellipsis);
+        }
+
+        status = sb.ToString();
+        return true;
+    }
+
+    private static bool IsProgressRune(Rune rune)
+    {
+        if (Rune.IsWhiteSpace(rune) || Rune.IsControl(rune))
+            return false;
+
+        return Rune.GetUnicodeCategory(rune) is not (
+            UnicodeCategory.Format or
+            UnicodeCategory.Surrogate or
+            UnicodeCategory.PrivateUse or
+            UnicodeCategory.OtherNotAssigned);
     }
 
     private bool TryPreparePath(string? requested, out string relative, out string fullPath, out string root, out string error)

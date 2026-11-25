@@ -47,7 +47,7 @@ internal static class ReviewAgent
             var agent = chat.AsAIAgent(new ChatClientAgentOptions
             {
                 Name = "aim-review",
-                Description = "Reviews a git diff and can read files, search the repository, and load review skills before answering.",
+                Description = "Reviews a git diff and can read files, search the repository, report a short status, and load review skills before answering.",
                 ChatOptions = new ChatOptions
                 {
                     Instructions = ReviewPrompt.AgentInstructions(request.NameOnly, skills: skills is not null),

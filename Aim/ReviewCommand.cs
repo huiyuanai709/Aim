@@ -52,7 +52,7 @@ public class ReviewCommand : Command
         };
         Option<bool> agentOption = new("--agent")
         {
-            Description = "Opt in to a review agent that can read files and search the repository before answering. Off by default. Large diffs run one agent per group."
+            Description = "Opt in to a review agent that can read files, search the repository, and print a short status before answering. Off by default. Large diffs run one agent per group."
         };
         Option<string?> maxRoundsOption = new("--max-rounds")
         {
