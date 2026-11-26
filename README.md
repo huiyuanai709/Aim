@@ -131,6 +131,8 @@ With `--agent`, each group gets its own agent. A one-call review still uses one 
 
 Tool progress is printed on stderr (`▶ file_read …`, `▶ code_search …`, `▶ report_progress …`). When several groups run at once, those lines share one locked stderr writer so they do not tear. Tool text is truncated to `maxtoolresultchars` (default 12000). Agent rounds default to `maxreviewrounds` (10). `report_progress` is a status line, separate from that tool-text cap.
 
+If the model stops on planning or status prose instead of the JSON array, Aim prints a short excerpt of that prose on stderr and continues the same conversation. The model can still call tools, and it must then return the JSON array. That continuation is bounded. If the JSON is still missing, the review fails and prints the raw response.
+
 With `--agent`, Aim also registers a Microsoft Agent Framework `AgentSkillsProvider` when it finds skill directories. Discovery order is:
 
 1. Paths in the repository's `.aim/config.json` (`skills`, then `skillspaths`). Each value may be a string or an array of strings. A string is split on `;`. Relative paths are relative to the git repository root.

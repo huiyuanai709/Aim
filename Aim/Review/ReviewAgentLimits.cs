@@ -7,6 +7,10 @@ internal static class ReviewAgentLimits
     public const int DefaultToolChars = 12_000;
     public const int MaxToolChars = 200_000;
 
+    // A tool-free assistant message ends the function loop. Review models sometimes
+    // spend that message on a plan. Each recovery is another turn on the same session.
+    public const int MaxJsonRecoveries = 3;
+
     public static bool TryResolveRounds(int? fromCli, int configured, bool agentEnabled, out int rounds, out string? note, out string error)
     {
         note = null;

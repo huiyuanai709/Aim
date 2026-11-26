@@ -123,17 +123,46 @@ internal static class ReviewAgent
             });
     }
 
-    public static async Task<string> CompleteAsync(ReviewAgentRequest request, string userPrompt, CancellationToken cancellationToken)
+    public static Task<string> CompleteAsync(ReviewAgentRequest request, string userPrompt, CancellationToken cancellationToken) =>
+        CompleteAsync(request, userPrompt, cancellationToken, chatClient: null);
+
+    internal static async Task<string> CompleteAsync(
+        ReviewAgentRequest request,
+        string userPrompt,
+        CancellationToken cancellationToken,
+        IChatClient? chatClient)
     {
-        var agent = Create(request);
+        var agent = Create(request, chatClient);
         try
         {
-            var response = await agent.RunAsync(userPrompt, cancellationToken: cancellationToken);
-            return response.Text ?? "";
+            var session = await agent.CreateSessionAsync(cancellationToken);
+            var response = await agent.RunAsync(userPrompt, session, cancellationToken: cancellationToken);
+            var text = response.Text ?? "";
+            for (var recovery = 0; recovery < ReviewAgentLimits.MaxJsonRecoveries && !IsReviewJson(text); recovery++)
+            {
+                // The function loop already stopped. Give the model the same thread so it can call tools and then return JSON.
+                WritePlanningStatus(request.Progress, text);
+                response = await agent.RunAsync(ReviewPrompt.JsonContinuation, session, cancellationToken: cancellationToken);
+                text = response.Text ?? "";
+            }
+
+            return text;
         }
         finally
         {
             DisposeProviders(agent);
         }
+    }
+
+    private static bool IsReviewJson(string text) =>
+        ReviewCommentParser.Parse(text, int.MaxValue).Success;
+
+    private static void WritePlanningStatus(TextWriter? progress, string text)
+    {
+        if (progress is null || !ReviewTools.TrySanitizeProgress(text, out var excerpt))
+            return;
+
+        progress.WriteLine("▶ " + excerpt);
+        progress.Flush();
     }
 }
