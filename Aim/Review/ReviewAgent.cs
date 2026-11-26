@@ -23,20 +23,15 @@ internal sealed class ReviewAgentRequest
 
 internal static class ReviewAgent
 {
-    public static ChatClientAgent Create(ReviewAgentRequest request)
+    public static ChatClientAgent Create(ReviewAgentRequest request) =>
+        Create(request, chatClient: null);
+
+    internal static ChatClientAgent Create(ReviewAgentRequest request, IChatClient? chatClient)
     {
         var tools = new ReviewTools(request.WorkingDirectory, request.Revision, request.MaxToolChars, request.Progress);
         var networkTimeout = request.NetworkTimeout > TimeSpan.Zero
             ? request.NetworkTimeout
             : TimeSpan.FromMinutes(ReviewParallelLimits.DefaultTimeoutMinutes);
-        var openAI = new OpenAIClient(
-            new ApiKeyCredential(request.ApiKey),
-            new OpenAIClientOptions
-            {
-                Endpoint = new Uri(request.Endpoint),
-                NetworkTimeout = networkTimeout
-            });
-        var chat = openAI.GetChatClient(request.Model);
         IList<AITool> functions = [.. tools.CreateFunctions()];
         AgentSkillsProvider? skills = null;
         try
@@ -44,7 +39,7 @@ internal static class ReviewAgent
             if (request.SkillDirectories.Count > 0)
                 skills = CreateSkills(request);
 
-            var agent = chat.AsAIAgent(new ChatClientAgentOptions
+            var options = new ChatClientAgentOptions
             {
                 Name = "aim-review",
                 Description = "Reviews a git diff and can read files, search the repository, report a short status, and load review skills before answering.",
@@ -55,7 +50,11 @@ internal static class ReviewAgent
                 },
                 AllowConcurrentInvocation = false,
                 AIContextProviders = skills is null ? null : [skills]
-            });
+            };
+
+            IChatClient client = chatClient ?? CreateModelClient(request, networkTimeout);
+            client = new LeakedToolCallChatClient(client);
+            var agent = client.AsAIAgent(options);
 
             if (agent.ChatClient.GetService<FunctionInvokingChatClient>() is { } invoking)
             {
@@ -71,6 +70,18 @@ internal static class ReviewAgent
             skills?.Dispose();
             throw;
         }
+    }
+
+    private static IChatClient CreateModelClient(ReviewAgentRequest request, TimeSpan networkTimeout)
+    {
+        var openAI = new OpenAIClient(
+            new ApiKeyCredential(request.ApiKey),
+            new OpenAIClientOptions
+            {
+                Endpoint = new Uri(request.Endpoint),
+                NetworkTimeout = networkTimeout
+            });
+        return openAI.GetChatClient(request.Model).AsIChatClient();
     }
 
     internal static void DisposeProviders(ChatClientAgent agent)
