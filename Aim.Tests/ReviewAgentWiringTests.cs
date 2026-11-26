@@ -25,6 +25,7 @@ public class ReviewAgentWiringTests
         var invoking = agent.ChatClient.GetService<FunctionInvokingChatClient>();
         Assert.NotNull(invoking);
         Assert.Equal(6, invoking.MaximumIterationsPerRequest);
+        Assert.NotNull(agent.ChatClient.GetService<LeakedToolCallChatClient>());
         Assert.False(invoking.AllowConcurrentInvocation);
 
         var names = RegisteredToolNames(agent);
