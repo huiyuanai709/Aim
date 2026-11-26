@@ -181,7 +181,7 @@ internal sealed class ReviewTools
         _progress.Flush();
     }
 
-    private static bool TrySanitizeProgress(string? message, out string status)
+    internal static bool TrySanitizeProgress(string? message, out string status)
     {
         status = "";
         if (string.IsNullOrWhiteSpace(message))
