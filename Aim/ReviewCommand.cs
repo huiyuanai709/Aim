@@ -66,7 +66,7 @@ public class ReviewCommand : Command
         };
         Option<int?> timeoutOption = new("--timeout")
         {
-            Description = "Minutes to wait for each review call (1-60). Default: 5, or reviewtimeoutminutes. Also raises the HTTP timeout, which otherwise stops a call at about 100 seconds.",
+            Description = "Limit each review call to this many minutes (1-60), or pass 0 for no limit. Default: no limit. When omitted, reviewtimeoutminutes is used (0 means no limit). A positive limit also raises the HTTP timeout above the OpenAI client's 100 second default.",
             HelpName = "minutes"
         };
         Option<int?> budgetOption = new("--max-tokens-budget")
@@ -335,7 +335,7 @@ public class ReviewCommand : Command
                 return 1;
             }
 
-            var timeout = TimeSpan.FromMinutes(timeoutMinutes);
+            var timeout = ReviewParallelLimits.CancellationTimeout(timeoutMinutes);
             var networkTimeout = ReviewChat.NetworkTimeoutFor(timeout);
             var endpoint = string.IsNullOrWhiteSpace(config.ApiEndpoint)
                 ? "https://api.openai.com/v1"
@@ -476,6 +476,9 @@ public class ReviewCommand : Command
 
                 async Task<string> InvokeWithTimeout(string prompt, CancellationToken ct)
                 {
+                    if (timeoutMinutes <= 0)
+                        return await Invoke(prompt, ct);
+
                     using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     cts.CancelAfter(timeout);
                     try
@@ -484,8 +487,7 @@ public class ReviewCommand : Command
                     }
                     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                     {
-                        throw new TimeoutException(
-                            $"The review timed out after {ReviewParallelLimits.FormatMinutes(timeoutMinutes)}. Raise --timeout (minutes) for a large diff.");
+                        throw new TimeoutException(TimeoutMessage(timeoutMinutes));
                     }
                 }
 
@@ -494,7 +496,7 @@ public class ReviewCommand : Command
                     if (agentEnabled && groups > 1)
                     {
                         Console.Error.WriteLine(
-                            $"Reviewing {description} with {model} (agent, up to {maxRounds} rounds, {groups} groups, concurrency {concurrency}, {ReviewParallelLimits.FormatMinutes(timeoutMinutes)} timeout per group)...");
+                            $"Reviewing {description} with {model} (agent, up to {maxRounds} rounds, {groups} groups, concurrency {concurrency}, {TimeoutPhrase(timeoutMinutes)})...");
                         return;
                     }
 
@@ -508,7 +510,7 @@ public class ReviewCommand : Command
                     if (groups > 1)
                     {
                         Console.Error.WriteLine(
-                            $"Reviewing {description} with {model} ({groups} groups, concurrency {concurrency}, {ReviewParallelLimits.FormatMinutes(timeoutMinutes)} timeout per group)...");
+                            $"Reviewing {description} with {model} ({groups} groups, concurrency {concurrency}, {TimeoutPhrase(timeoutMinutes)})...");
                         return;
                     }
 
@@ -642,8 +644,7 @@ public class ReviewCommand : Command
         switch (outcome.Status)
         {
             case ReviewGroupStatus.TimedOut:
-                Console.Error.WriteLine(
-                    $"Error: The review timed out after {ReviewParallelLimits.FormatMinutes(timeoutMinutes)}. Raise --timeout (minutes) for a large diff.");
+                Console.Error.WriteLine($"Error: {TimeoutMessage(timeoutMinutes)}");
                 return 1;
             case ReviewGroupStatus.ApiError:
                 Console.Error.WriteLine($"Error calling AI API: {outcome.Error}");
@@ -662,12 +663,24 @@ public class ReviewCommand : Command
 
     private static string DescribeFailure(ReviewGroupOutcome outcome, int timeoutMinutes) => outcome.Status switch
     {
-        ReviewGroupStatus.TimedOut => $"timed out after {ReviewParallelLimits.FormatMinutes(timeoutMinutes)}",
+        ReviewGroupStatus.TimedOut => timeoutMinutes > 0
+            ? $"timed out after {ReviewParallelLimits.FormatMinutes(timeoutMinutes)}"
+            : "timed out",
         ReviewGroupStatus.OverBudget => "was not sent because the token budget was reached",
         ReviewGroupStatus.ApiError => $"failed: {outcome.Error}",
         ReviewGroupStatus.ParseError => $"was skipped: {outcome.Error}",
         _ => outcome.Error
     };
+
+    private static string TimeoutMessage(int timeoutMinutes) =>
+        timeoutMinutes > 0
+            ? $"The review timed out after {ReviewParallelLimits.FormatMinutes(timeoutMinutes)}."
+            : "The review timed out.";
+
+    private static string TimeoutPhrase(int timeoutMinutes) =>
+        timeoutMinutes > 0
+            ? $"{ReviewParallelLimits.FormatMinutes(timeoutMinutes)} timeout per group"
+            : "no per-group timeout";
 
     private static bool TryParseMaxRounds(string? text, out int? rounds, out string error)
     {

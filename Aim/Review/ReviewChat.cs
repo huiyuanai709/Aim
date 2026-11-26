@@ -8,7 +8,9 @@ namespace Aim;
 internal static class ReviewChat
 {
     public static TimeSpan NetworkTimeoutFor(TimeSpan groupTimeout) =>
-        groupTimeout + TimeSpan.FromSeconds(ReviewParallelLimits.NetworkTimeoutBufferSeconds);
+        groupTimeout > TimeSpan.Zero
+            ? groupTimeout + TimeSpan.FromSeconds(ReviewParallelLimits.NetworkTimeoutBufferSeconds)
+            : Timeout.InfiniteTimeSpan;
 
     public static OpenAIClient CreateClient(string apiKey, string endpoint, TimeSpan networkTimeout)
     {

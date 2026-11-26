@@ -193,9 +193,9 @@ public class ConfigManager
                 break;
             case "reviewtimeoutminutes":
                 if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var timeoutMinutes) ||
-                    timeoutMinutes < 1 || timeoutMinutes > ReviewParallelLimits.MaxTimeoutMinutes)
+                    timeoutMinutes < 0 || timeoutMinutes > ReviewParallelLimits.MaxTimeoutMinutes)
                 {
-                    error = $"Error: reviewtimeoutminutes must be an integer from 1 to {ReviewParallelLimits.MaxTimeoutMinutes}, got '{value}'.";
+                    error = $"Error: reviewtimeoutminutes must be 0 (no limit) or an integer from 1 to {ReviewParallelLimits.MaxTimeoutMinutes}, got '{value}'.";
                     return false;
                 }
 
@@ -230,7 +230,8 @@ public class ConfigManager
         Console.WriteLine($"  MaxToolResultChars: {config.MaxToolResultChars}");
         Console.WriteLine($"  SkillsPaths:       {(string.IsNullOrWhiteSpace(config.SkillsPaths) ? "(not set)" : config.SkillsPaths)}");
         Console.WriteLine($"  ReviewConcurrency: {config.ReviewConcurrency}");
-        Console.WriteLine($"  ReviewTimeoutMinutes: {config.ReviewTimeoutMinutes}");
+        Console.WriteLine(
+            $"  ReviewTimeoutMinutes: {(config.ReviewTimeoutMinutes == 0 ? "(no limit)" : config.ReviewTimeoutMinutes.ToString())}");
         Console.WriteLine(new string('-', 60));
     }
 }

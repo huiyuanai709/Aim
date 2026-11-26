@@ -92,6 +92,18 @@ public class ReviewCommandParseTests
     }
 
     [Fact]
+    public void HelpDescribesTimeoutAsUnlimitedByDefault()
+    {
+        var review = new ReviewCommand();
+        var timeout = Assert.Single(review.Options, option => option.Name == "--timeout");
+        Assert.Equal("minutes", timeout.HelpName);
+        Assert.Contains("no limit", timeout.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("reviewtimeoutminutes", timeout.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1-60", timeout.Description, StringComparison.Ordinal);
+        Assert.DoesNotContain("Default: 5", timeout.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void HelpDescribesBareCommitAsLatestHead()
     {
         var review = new ReviewCommand();

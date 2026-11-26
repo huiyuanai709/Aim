@@ -607,7 +607,7 @@ internal static class ReviewDiffPlanner
     private static void AppendTimeout(StringBuilder sb, int timeoutMinutes)
     {
         sb.Append("Per-group timeout: ")
-            .Append(ReviewParallelLimits.FormatMinutes(timeoutMinutes))
+            .Append(ReviewParallelLimits.FormatTimeout(timeoutMinutes))
             .Append('\n');
     }
 

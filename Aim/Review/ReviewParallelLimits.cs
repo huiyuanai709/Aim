@@ -6,7 +6,8 @@ internal static class ReviewParallelLimits
 {
     public const int DefaultConcurrency = 8;
     public const int MaxConcurrency = 32;
-    public const int DefaultTimeoutMinutes = 5;
+    // 0 means a review call has no time limit.
+    public const int DefaultTimeoutMinutes = 0;
     public const int MaxTimeoutMinutes = 60;
     public const int MaxFilesPerGroup = 10;
     public const int DefaultGroupChars = 80_000;
@@ -17,6 +18,12 @@ internal static class ReviewParallelLimits
         var value = minutes.ToString(CultureInfo.InvariantCulture);
         return minutes == 1 ? "1 minute" : $"{value} minutes";
     }
+
+    public static string FormatTimeout(int minutes) =>
+        minutes > 0 ? FormatMinutes(minutes) : "no limit";
+
+    public static TimeSpan CancellationTimeout(int minutes) =>
+        minutes > 0 ? TimeSpan.FromMinutes(minutes) : Timeout.InfiniteTimeSpan;
 
     public static bool TryResolveConcurrency(int? fromCli, int configured, out int concurrency, out string? note, out string error)
     {
@@ -52,10 +59,10 @@ internal static class ReviewParallelLimits
         note = null;
         if (fromCli is int cli)
         {
-            if (cli < 1 || cli > MaxTimeoutMinutes)
+            if (cli < 0 || cli > MaxTimeoutMinutes)
             {
                 minutes = DefaultTimeoutMinutes;
-                error = $"Error: --timeout must be an integer number of minutes from 1 to {MaxTimeoutMinutes}.";
+                error = $"Error: --timeout must be 0 (no limit) or an integer number of minutes from 1 to {MaxTimeoutMinutes}.";
                 return false;
             }
 
@@ -64,12 +71,12 @@ internal static class ReviewParallelLimits
             return true;
         }
 
-        if (configured is >= 1 and <= MaxTimeoutMinutes)
+        if (configured == 0 || configured is >= 1 and <= MaxTimeoutMinutes)
             minutes = configured;
         else
         {
             minutes = DefaultTimeoutMinutes;
-            note = $"Warning: reviewtimeoutminutes must be from 1 to {MaxTimeoutMinutes}. Using {DefaultTimeoutMinutes}.";
+            note = $"Warning: reviewtimeoutminutes must be 0 (no limit) or from 1 to {MaxTimeoutMinutes}. Using no limit.";
         }
 
         error = "";

@@ -68,7 +68,7 @@ public class ConfigManagerTests
             Assert.Equal(12000, loaded.MaxToolResultChars);
             Assert.Equal("", loaded.SkillsPaths);
             Assert.Equal(8, loaded.ReviewConcurrency);
-            Assert.Equal(5, loaded.ReviewTimeoutMinutes);
+            Assert.Equal(0, loaded.ReviewTimeoutMinutes);
         }
         finally
         {
@@ -124,7 +124,11 @@ public class ConfigManagerTests
 
         Assert.True(ConfigManager.TryApply(config, "reviewtimeoutminutes", "12", out error), error);
         Assert.Equal(12, config.ReviewTimeoutMinutes);
+        Assert.True(ConfigManager.TryApply(config, "reviewtimeoutminutes", "0", out error), error);
+        Assert.Equal(0, config.ReviewTimeoutMinutes);
         Assert.False(ConfigManager.TryApply(config, "reviewtimeoutminutes", "61", out error));
+        Assert.Contains("no limit", error);
         Assert.Contains("1 to 60", error);
+        Assert.False(ConfigManager.TryApply(config, "reviewtimeoutminutes", "-1", out error));
     }
 }
