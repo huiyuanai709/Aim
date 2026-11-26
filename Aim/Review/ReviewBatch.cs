@@ -21,7 +21,8 @@ internal sealed class ReviewGroupOutcome
 internal sealed class ReviewBatchRequest
 {
     public int Concurrency { get; init; } = ReviewParallelLimits.DefaultConcurrency;
-    public TimeSpan GroupTimeout { get; init; } = TimeSpan.FromMinutes(ReviewParallelLimits.DefaultTimeoutMinutes);
+    public TimeSpan GroupTimeout { get; init; } =
+        ReviewParallelLimits.CancellationTimeout(ReviewParallelLimits.DefaultTimeoutMinutes);
     public int MaxTokensBudget { get; init; }
     public int MaxComments { get; init; } = 20;
 }
@@ -110,7 +111,8 @@ internal static class ReviewBatch
         try
         {
             using var groupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            groupCts.CancelAfter(request.GroupTimeout);
+            if (request.GroupTimeout > TimeSpan.Zero)
+                groupCts.CancelAfter(request.GroupTimeout);
             var raw = await reviewGroup(group, groupCts.Token);
             outcomes[index] = Interpret(group, raw);
         }

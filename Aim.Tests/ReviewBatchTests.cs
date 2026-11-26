@@ -37,6 +37,27 @@ public class ReviewBatchTests
     }
 
     [Fact]
+    public async Task DefaultTimeoutDoesNotCancelASlowGroup()
+    {
+        var request = new ReviewBatchRequest { Concurrency = 1, MaxComments = 20 };
+        Assert.Equal(Timeout.InfiniteTimeSpan, request.GroupTimeout);
+
+        var result = await ReviewBatch.RunAsync(
+            [Group(1)],
+            request,
+            async (group, ct) =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(300), ct);
+                Assert.False(ct.IsCancellationRequested);
+                return CommentJson(group.Label, "low");
+            },
+            CancellationToken.None);
+
+        Assert.True(result.AnySuccess);
+        Assert.Equal(ReviewGroupStatus.Succeeded, Assert.Single(result.Outcomes).Status);
+    }
+
+    [Fact]
     public async Task TimeoutKeepsCommentsFromTheGroupsThatFinished()
     {
         var groups = new[] { Group(1), Group(2) };

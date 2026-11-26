@@ -105,7 +105,7 @@ Review a diff and print AI line comments. The default input is staged changes (`
 - `--agent`: opt in to a Microsoft Agent Framework review agent (`ChatClientAgent`) that may call `file_read`, `code_search`, and `report_progress`, and load file-based skills, before the final answer. Off by default. The final answer is still the same JSON comment array.
 - `--max-rounds <n>`: cap agent tool rounds (1–40). Overrides `maxreviewrounds`. Without `--agent`, a valid value is ignored after a note on stderr.
 - `--concurrency <n>`: how many groups to review at the same time when a diff is split (1–32). Default: `8`, or `reviewconcurrency`.
-- `--timeout <minutes>`: how long to wait for each review call, in minutes (1–60). Default: `5`, or `reviewtimeoutminutes`. This also raises the HTTP timeout. Without it, the OpenAI client stops a call at about 100 seconds.
+- `--timeout <minutes>`: optional limit on each review call, in minutes (1–60). Pass `0` for no limit. Default: no limit. When the flag is omitted, `reviewtimeoutminutes` is used (`0` means no limit). A positive limit also raises the HTTP timeout above the OpenAI client's about 100 second default.
 - `--max-tokens-budget <n>`: optional cap on how much diff text is sent. Aim estimates tokens as the group diff length divided by 4. The first group is always sent. Aim does not start a later group when the estimate would pass this number. Comments from the groups that finished are still printed.
 - `--preview`: print the files and groups that would be reviewed, then exit. Does not call the model and does not need an API key.
 
@@ -113,7 +113,7 @@ Line numbers refer to the **new file** in the diff. Aim writes those numbers ont
 
 A diff that already fits in one model call stays one call. That is true when `maxdiffchars` is greater than 0 and the whole diff fits in that budget (default `80000`), or when `maxdiffchars` is `0` and the diff has at most 10 files. Splitting those reviews would add calls without covering more of the diff.
 
-A larger diff is split by directory. Each group has at most 10 files. When `maxdiffchars` is greater than 0, each group also stays within that many characters. The groups run at the same time. `--agent` uses the same groups, the same concurrency, and the same timeout. The timeout covers every tool round in that group.
+A larger diff is split by directory. Each group has at most 10 files. When `maxdiffchars` is greater than 0, each group also stays within that many characters. The groups run at the same time. `--agent` uses the same groups, the same concurrency, and the same timeout. When a timeout is set, it covers every tool round in that group. With no timeout, a group is not stopped for taking too long.
 
 A single file longer than 80% of `maxdiffchars` is skipped. Aim prints a warning on stderr and reviews the other files. One oversized file does not fail the run. If every file is oversized, the command exits with code 1. `maxdiffchars` of `0` does not skip files for size; a review with more than 10 files is still grouped by directory.
 
@@ -228,13 +228,13 @@ aim review --agent --max-rounds 8
 # See which files and groups would be reviewed, without calling the model
 aim review --branch --preview
 
-# Review a large branch in parallel. Timeout is in minutes.
-aim review --branch --concurrency 8 --timeout 5
+# Review a large branch in parallel. No --timeout means no time limit.
+aim review --branch --concurrency 8
 
 # Stop starting later groups after an approximate token budget
 aim review --branch --max-tokens-budget 80000
 
-# The agent uses the same groups and the same timeout
+# The agent uses the same groups. Pass --timeout to cap each group, in minutes.
 aim review --branch --agent --concurrency 4 --timeout 10
 
 # Product context and a local rules file
@@ -267,7 +267,7 @@ Manage configuration settings.
 | `maxtoolresultchars` | Maximum characters returned by one review tool | `12000` |
 | `skillspaths` | Extra `--agent` skill directories, separated by `;`. Relative paths use the repository root | _(empty)_ |
 | `reviewconcurrency` | Groups reviewed at the same time when a diff is split | `8` |
-| `reviewtimeoutminutes` | Minutes to wait for each review call. Also raises the HTTP timeout | `5` |
+| `reviewtimeoutminutes` | Minutes to wait for each review call. `0` means no limit. A positive value also raises the HTTP timeout | `0` |
 
 **Examples:**
 ```bash
@@ -331,7 +331,7 @@ MaxReviewRounds = 10
 MaxToolResultChars = 12000
 SkillsPaths =
 ReviewConcurrency = 8
-ReviewTimeoutMinutes = 5
+ReviewTimeoutMinutes = 0
 ```
 
 ## 🎯 Commit Message Rules

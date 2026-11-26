@@ -62,6 +62,7 @@ public class ReviewDiffPlannerTests
         var preview = ReviewDiffPlanner.FormatPreview(plan, "main...HEAD", agent: true, concurrency: 4, timeoutMinutes: 5, maxTokensBudget: 0);
         Assert.Contains("Mode: parallel groups, with the review agent", preview);
         Assert.Contains("Concurrency: 4", preview);
+        Assert.Contains("Per-group timeout: 5 minutes", preview);
         Assert.Contains("grouped by directory", preview);
         Assert.True(preview.IndexOf("src/a/A.cs", StringComparison.Ordinal) < preview.IndexOf("src/b/C.cs", StringComparison.Ordinal));
     }
@@ -164,6 +165,10 @@ public class ReviewDiffPlannerTests
         var preview = ReviewDiffPlanner.FormatPreview(plan, "staged changes", false, 8, 1, 0);
         Assert.Contains("no per-file headers", preview);
         Assert.Contains("Per-group timeout: 1 minute", preview);
+
+        var unlimited = ReviewDiffPlanner.FormatPreview(plan, "staged changes", false, 8, 0, 0);
+        Assert.Contains("Per-group timeout: no limit", unlimited);
+        Assert.DoesNotContain("0 minutes", unlimited);
     }
 
     [Fact]

@@ -18,7 +18,8 @@ internal sealed class ReviewAgentRequest
     public string? Revision { get; init; }
     public TextWriter? Progress { get; init; }
     public IReadOnlyList<string> SkillDirectories { get; init; } = [];
-    public TimeSpan NetworkTimeout { get; init; } = TimeSpan.FromMinutes(ReviewParallelLimits.DefaultTimeoutMinutes);
+    public TimeSpan NetworkTimeout { get; init; } =
+        ReviewParallelLimits.CancellationTimeout(ReviewParallelLimits.DefaultTimeoutMinutes);
 }
 
 internal static class ReviewAgent
@@ -31,7 +32,7 @@ internal static class ReviewAgent
         var tools = new ReviewTools(request.WorkingDirectory, request.Revision, request.MaxToolChars, request.Progress);
         var networkTimeout = request.NetworkTimeout > TimeSpan.Zero
             ? request.NetworkTimeout
-            : TimeSpan.FromMinutes(ReviewParallelLimits.DefaultTimeoutMinutes);
+            : Timeout.InfiniteTimeSpan;
         IList<AITool> functions = [.. tools.CreateFunctions()];
         AgentSkillsProvider? skills = null;
         try
