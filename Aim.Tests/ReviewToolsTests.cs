@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Aim;
+using Ngrep.Search;
 
 namespace Aim.Tests;
 
@@ -114,6 +115,111 @@ public class ReviewToolsTests
         Assert.Contains("more lines omitted", result);
         Assert.Contains("▶ code_search", progress.ToString());
         Assert.Equal("No matches.", tools.CodeSearch("this-string-is-absent", "notes.txt"));
+        Assert.False(Directory.Exists(Path.Combine(repo.Path, ".ngrep")));
+    }
+
+    [Fact]
+    public void WorktreeSearchUsesNgrepAndRevisionSearchUsesGitGrep()
+    {
+        using var repo = new TempRepo();
+        repo.Write("tracked.txt", "committed-token\n");
+        repo.Git("add", "tracked.txt");
+        repo.Git("commit", "-m", "init");
+        var (ok, sha, err) = GitExecutor.RunGit(["rev-parse", "HEAD"], repo.Path);
+        Assert.True(ok, err);
+        repo.Write("tracked.txt", "worktree-token\n");
+        repo.Write("untracked.txt", "untracked-token\n");
+        repo.Write(".dot.txt", "dotfile-token\n");
+        repo.Write(".gitignore", "ignored.txt\n");
+        repo.Write("ignored.txt", "ignored-token\n");
+        repo.Write("src/App.cs", "nested-token\n");
+        repo.Write("lit.txt", "a.b\naxb\n");
+        repo.Write("bin.dat", "before\0needle-bin\n");
+
+        var work = new ReviewTools(repo.Path, revision: null, maxChars: 20_000, TextWriter.Null);
+        var atCommit = new ReviewTools(repo.Path, sha.Trim(), maxChars: 20_000, TextWriter.Null);
+
+        Assert.Contains("tracked.txt:", work.CodeSearch("worktree-token"));
+        Assert.Contains("worktree-token", work.CodeSearch("worktree-token"));
+        Assert.Equal("No matches.", work.CodeSearch("committed-token"));
+        Assert.Contains("untracked.txt:", work.CodeSearch("untracked-token"));
+        Assert.Contains(".dot.txt:", work.CodeSearch("dotfile-token"));
+        Assert.Equal("No matches.", work.CodeSearch("ignored-token"));
+        Assert.Contains("src/App.cs:", work.CodeSearch("nested-token", "src"));
+        var literal = work.CodeSearch("a.b", "lit.txt");
+        Assert.Contains("lit.txt:", literal);
+        Assert.Contains("a.b", literal);
+        Assert.DoesNotContain("axb", literal);
+        Assert.Equal("No matches.", work.CodeSearch("needle-bin"));
+
+        Assert.Contains("committed-token", atCommit.CodeSearch("committed-token"));
+        Assert.DoesNotContain("worktree-token", atCommit.CodeSearch("committed-token"));
+        Assert.Equal("No matches.", atCommit.CodeSearch("worktree-token"));
+        Assert.Equal("No matches.", atCommit.CodeSearch("untracked-token"));
+        Assert.Contains("tracked.txt:", atCommit.CodeSearch("committed-token", "tracked.txt"));
+    }
+
+    [Fact]
+    public async Task WorktreeSearchUsesAnExistingIndexAndDoesNotBuildOne()
+    {
+        using var repo = new TempRepo();
+        repo.Write("old.txt", "indexed-token\n");
+        repo.Git("add", "old.txt");
+        repo.Git("commit", "-m", "init");
+
+        var tools = new ReviewTools(repo.Path, revision: null, maxChars: 12_000, TextWriter.Null);
+        Assert.Contains("old.txt:1:indexed-token", tools.CodeSearch("indexed-token"));
+        Assert.False(Directory.Exists(Path.Combine(repo.Path, ".ngrep")));
+
+        using (CliCapture.Hold())
+        {
+            Assert.Equal(0, await SearchCommand.Invoke(["index", repo.Path, "--quiet"]));
+        }
+
+        Assert.True(File.Exists(Path.Combine(repo.Path, ".ngrep", "index", "manifest.json")));
+        repo.Write("new.txt", "indexed-token\n");
+
+        var indexed = tools.CodeSearch("indexed-token");
+        Assert.Contains("old.txt:", indexed);
+        Assert.DoesNotContain("new.txt", indexed);
+
+        Directory.Delete(Path.Combine(repo.Path, ".ngrep"), recursive: true);
+        var scanned = tools.CodeSearch("indexed-token");
+        Assert.Contains("old.txt:", scanned);
+        Assert.Contains("new.txt:", scanned);
+    }
+
+    [Fact]
+    public void CodeSearchStopsBeforeReadingEveryMatchingFile()
+    {
+        using var repo = new TempRepo();
+        const int files = 400;
+        for (var i = 0; i < files; i++)
+            repo.Write($"early/f{i:000}.txt", "needle-line\n");
+        repo.Git("add", "early");
+        repo.Git("commit", "-m", "early");
+
+        var confirmed = 0;
+        var previous = Searcher.BeforeConfirm;
+        Searcher.BeforeConfirm = path =>
+        {
+            if (path.StartsWith("early/", StringComparison.Ordinal))
+                Interlocked.Increment(ref confirmed);
+            previous?.Invoke(path);
+        };
+        try
+        {
+            var tools = new ReviewTools(repo.Path, revision: null, maxChars: 200_000, TextWriter.Null);
+            var result = tools.CodeSearch("needle-line");
+            var hits = result.Split('\n').Count(line => line.Contains("needle-line", StringComparison.Ordinal));
+            Assert.Equal(ReviewTools.MaxSearchLines, hits);
+            Assert.Contains("more lines omitted", result, StringComparison.Ordinal);
+            Assert.InRange(confirmed, 1, files - 1);
+        }
+        finally
+        {
+            Searcher.BeforeConfirm = previous;
+        }
     }
 
     [Fact]

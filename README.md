@@ -9,13 +9,14 @@ AIM is a command-line tool that leverages AI to generate meaningful, semantic co
 ## ✨ Features
 
 - 🤖 **AI-Powered**: Uses OpenAI-compatible APIs to analyze your git diff and generate contextual commit messages
-- ⚡ **Fast & Efficient**: Built with .NET 10.0 AOT compilation for blazing-fast performance
+- ⚡ **Fast & Efficient**: Built with .NET 11 AOT compilation for blazing-fast performance
 - 🎯 **Semantic Commits**: Follows best practices with imperative mood and proper structure
 - ⚙️ **Configurable**: Customize model, endpoint, message length, and behavior
 - 🔄 **Auto-commit**: Optional automatic commit after message generation
 - 📝 **Amend Support**: Generate messages for amending previous commits
 - 🔍 **Diff review**: `aim review` prints line comments for staged changes, a triple-dot range, the current branch against the default branch, or one commit. Large diffs are split into directory groups and reviewed together
 - 🛠️ **Optional review agent**: `--agent` can read files, search the repo, and print a short status before it answers. Off unless you ask for it
+- 🔎 **Code search**: `aim search` runs [ngrep](https://github.com/huiyuanai709/ngrep) in-process, including its SIMD scanners and `.ngrep/index`
 - 🎨 **Clean Output**: Beautiful, readable console output
 
 ## 🚀 Quick Start
@@ -126,7 +127,7 @@ Each comment has `path`, `start_line`, `end_line`, `severity` (`critical`, `high
 With `--agent`, each group gets its own agent. A one-call review still uses one agent. The agent may call these tools before that JSON array:
 
 - `file_read` reads a repo-relative file. For `--commit` or `--first-commit`, it uses `git show` of that commit. For `--from`/`--to` or `--branch`, it uses `git show` of the head ref (`--to`, or `HEAD` for `--branch`). A staged review reads the working tree. Paths must stay inside the repository. A read returns at most 200 lines.
-- `code_search` runs `git grep` for a fixed string (not a shell command and not a regular expression) and returns at most 80 lines.
+- `code_search` finds a fixed string (not a shell command and not a regular expression) and returns at most 80 lines. A worktree review searches with ngrep and stops at that cap. That includes untracked files that are not ignored. If `.ngrep/index` already exists it is used; otherwise ngrep scans. Aim does not build the index for you. A `--commit` or range review (`--from`/`--to`, `--branch`) uses `git grep` on that revision, because ngrep reads the filesystem and not a historical git tree.
 - `report_progress` prints one short status line on stderr and returns immediately. It does not submit a review comment, and each call uses one agent round. The agent is instructed to call it with a half-sentence of plain language before reading files, searching, loading a skill, or writing the final findings. The wording follows the code, its comments, and the user context. A long or multiline message is collapsed to a single line and capped.
 
 Tool progress is printed on stderr (`▶ file_read …`, `▶ code_search …`, `▶ report_progress …`). When several groups run at once, those lines share one locked stderr writer so they do not tear. Tool text is truncated to `maxtoolresultchars` (default 12000). Agent rounds default to `maxreviewrounds` (10). `report_progress` is a status line, separate from that tool-text cap.
@@ -152,7 +153,7 @@ When the file has no shebang, the extension selects the command:
 | `.js` | `node <script> <args>` |
 | `.cs`, `.csx` | `dotnet run --file <script> -- <args>` |
 
-The C# command is the .NET 10 file-based app host. Arguments after `--` are for the script, not for `dotnet`.
+The C# command is the .NET 11 file-based app host. Arguments after `--` are for the script, not for `dotnet`.
 
 If the first line starts with `#!`, that interpreter is used instead of the table. Aim parses the line the way the kernel does: an absolute interpreter path, one optional argument, then the script path, then the user arguments. `#!/bin/sh` and `#!/usr/bin/env dotnet` are both accepted. The interpreter must exist, must be absolute, and must not contain `..`. A relative shebang is rejected.
 
@@ -239,6 +240,34 @@ aim review --branch --agent --concurrency 4 --timeout 10
 
 # Product context and a local rules file
 aim review --background "Payments service. Prefer explicit errors." --rule ./REVIEW.md
+```
+
+### `aim search`
+
+Search file contents with [ngrep](https://github.com/huiyuanai709/ngrep), linked into Aim. Nothing is shelled out to an `ngrep` binary. Patterns are .NET regular expressions unless you pass `-F` / `--fixed-strings`.
+
+```bash
+aim search <pattern> [PATH...]
+aim search index <path>
+aim search watch <path>
+aim search --files [PATH...]
+```
+
+`aim search <pattern> [PATH...]` is the same command as `aim search search`. Each path is a separate root. With no path, a terminal searches the working directory and a pipe searches stdin.
+
+Search uses `<root>/.ngrep/index` when that index covers the path. It does not create the index. `aim search index <path>` builds or updates `<path>/.ngrep/index`. A later search then skips files the trigram index can reject. `aim search watch <path>` refreshes the index as the tree changes.
+
+Ignore rules are ngrep's: `.gitignore`, `.ignore`, `.rgignore`, git `info/exclude`, and the global excludes file. `.git` and `.ngrep` stay skipped. Hidden names are skipped unless `--hidden`. A file with a NUL in the first 8 KiB is skipped unless `--binary` or `-a` / `--text`.
+
+`aim search --help` lists the flags (`-F`, `-i`, `-S`, `-g`, `-t`, `-m`, `--no-column`, `--no-heading`, `--color never`, and the rest). Text output includes the column by default. `--no-column --no-heading` prints `path:line:text`. `--color auto` does not color a pipe.
+
+The published binary is still one file per RID. SSE2, AVX2, and AVX-512 stay in that file and the scanner is chosen at runtime.
+
+```bash
+aim search index .
+aim search TODO src
+aim search -F 'a.b' .
+aim search --files -g '*.cs'
 ```
 
 ### `aim config`
@@ -346,15 +375,15 @@ AIM generates commit messages following these conventions:
 
 ## 🔧 Technology Stack
 
-- **.NET 10.0**: Latest .NET with native AOT compilation
+- **.NET 11**: Native AOT compilation. Code search is the vendored [ngrep](https://github.com/huiyuanai709/ngrep) library (v0.20.0), SIMD scanners included
 - **OpenAI SDK**: Official OpenAI .NET library (v2.14.0)
 - **Microsoft Agent Framework**: `ChatClientAgent` for the optional `aim review --agent` tool loop, and `AgentSkillsProvider` for `SKILL.md` skills (v1.25.0). Microsoft.Extensions.AI is the chat client underneath that agent.
-- **System.CommandLine**: Modern command-line parsing (v2.0.0)
+- **System.CommandLine**: Modern command-line parsing (v2.0.12)
 - **Microsoft.Extensions.Configuration**: Robust configuration management
 
 ## 📋 Requirements
 
-- .NET 10.0 SDK or runtime
+- .NET 11 SDK (`11.0.100` or a later 11.0 feature band; see `global.json`)
 - Git installed and available in PATH
 - OpenAI API key or compatible API endpoint
 

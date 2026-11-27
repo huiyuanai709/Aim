@@ -1,10 +1,17 @@
-﻿using System.CommandLine;
+﻿using System.Text;
 using Aim;
+using Ngrep.Output;
 
-RootCommand rootCommand = new("AIM: AI commit messages and diff review for Git")
+if (args.Length > 0 && args[0] == "search")
 {
-    new ConfigCommand(),
-    new CommitCommand(),
-    new ReviewCommand()
-};
-return await rootCommand.Parse(args).InvokeAsync();
+    var forwarded = args.Length == 1 ? [] : args[1..];
+    if (!SearchCommand.WantsHelp(forwarded))
+    {
+        Console.OutputEncoding = Encoding.UTF8;
+        Stdout.Install();
+    }
+
+    return await SearchCommand.Invoke(forwarded);
+}
+
+return await CliRoot.Create().Parse(args).InvokeAsync();
