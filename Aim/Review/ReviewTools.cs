@@ -54,7 +54,7 @@ internal sealed class ReviewTools
             new AIFunctionFactoryOptions
             {
                 Name = "code_search",
-                Description = "Search tracked repository files for a fixed string with git grep. Not a regular expression. Optional repo-relative path limits the search.",
+                Description = "Search repository files for a fixed string. Not a regular expression. A worktree search uses ngrep and honors ignore rules; an existing .ngrep/index is used, otherwise contents are scanned. A reviewed commit or range uses git grep on that revision. Optional repo-relative path. At most 80 lines.",
                 SerializerOptions = serializer
             });
         AIFunction reportProgress = AIFunctionFactory.Create(
@@ -143,12 +143,15 @@ internal sealed class ReviewTools
             preview = preview[..80] + "...";
         WriteProgress(relative is null ? $"▶ code_search {preview}" : $"▶ code_search {preview} {relative}");
 
-        var args = new List<string> { "grep", "-n", "-I", "-F", "--full-name", "-e", query };
-        if (_revision is not null)
-            args.Add(_revision);
-        args.Add("--");
-        args.Add(relative ?? ".");
+        if (_revision is null)
+        {
+            var found = NgrepWorktreeSearch.Collect(root, relative, query, MaxSearchLines + 1);
+            if (found.Error is not null)
+                return found.Error;
+            return ClipLines(found.Output, MaxSearchLines, "search");
+        }
 
+        var args = new List<string> { "grep", "-n", "-I", "-F", "--full-name", "-e", query, _revision, "--", relative ?? "." };
         var (ok, output, err) = GitExecutor.RunGit(args, root);
         if (!ok)
         {

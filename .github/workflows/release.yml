@@ -46,7 +46,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Publish
         run: dotnet publish Aim/Aim.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish
