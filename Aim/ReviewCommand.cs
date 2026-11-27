@@ -610,6 +610,11 @@ public class ReviewCommand : Command
                 Console.Error.WriteLine("\nOperation was cancelled");
                 return 1;
             }
+            catch (ReviewModelEmptyException ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
             catch (TimeoutException ex)
             {
                 Console.Error.WriteLine($"Error: {ex.Message}");

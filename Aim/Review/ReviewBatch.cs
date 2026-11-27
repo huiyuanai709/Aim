@@ -128,6 +128,15 @@ internal static class ReviewBatch
                 Status = ReviewGroupStatus.TimedOut
             };
         }
+        catch (ReviewModelEmptyException ex)
+        {
+            outcomes[index] = new ReviewGroupOutcome
+            {
+                Group = group,
+                Status = ReviewGroupStatus.ParseError,
+                Error = ex.Message
+            };
+        }
         catch (Exception ex)
         {
             outcomes[index] = new ReviewGroupOutcome

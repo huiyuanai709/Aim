@@ -134,6 +134,8 @@ Tool progress is printed on stderr (`▶ file_read …`, `▶ code_search …`, 
 
 If the model stops on planning or status prose instead of the JSON array, Aim prints a short excerpt of that prose on stderr and continues the same conversation. The model can still call tools, and it must then return the JSON array. That continuation is bounded. If the JSON is still missing, the review fails and prints the raw response.
 
+If a turn has no assistant text and no tool call, or the API returns no message at all, Aim stays on that same conversation and asks again. That retry is bounded separately from the prose continuation. `[]` is a finished review with nothing to report, not an empty response. If the empty replies continue, the review fails. When the API sent a finish reason, or the body had no message, the error says so.
+
 With `--agent`, Aim also registers a Microsoft Agent Framework `AgentSkillsProvider` when it finds skill directories. Discovery order is:
 
 1. Paths in the repository's `.aim/config.json` (`skills`, then `skillspaths`). Each value may be a string or an array of strings. A string is split on `;`. Relative paths are relative to the git repository root.

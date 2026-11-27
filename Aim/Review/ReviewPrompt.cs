@@ -23,6 +23,9 @@ internal static class ReviewPrompt
     public const string JsonContinuation =
         "That was not the review JSON. Continue this same review. You may call tools. When you finish, return only the JSON array from the instructions, or [] if nothing is worth reporting. Do not describe your plan.";
 
+    public const string EmptyContinuation =
+        "The previous reply was empty. Continue this same review. You may call tools. When you finish, return only the JSON array from the instructions, or [] if nothing is worth reporting. Do not describe your plan.";
+
     public static string Build(ReviewPromptInput input)
     {
         var sb = new StringBuilder();
