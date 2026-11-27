@@ -21,7 +21,9 @@ public class ReviewAgentLimitsTests
 
         Assert.True(ok, error);
         Assert.Equal(3, rounds);
-        Assert.Contains("--agent", note);
+        Assert.Contains("--no-agent", note);
+        Assert.Contains("ignored", note, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("only with --agent", note, StringComparison.Ordinal);
     }
 
     [Fact]

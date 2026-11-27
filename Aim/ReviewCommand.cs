@@ -8,7 +8,7 @@ public class ReviewCommand : Command
 {
     public ReviewCommand() : base(
         "review",
-        "Review a git diff and print AI line comments. Defaults to staged changes. Use --branch for default-branch...HEAD. Large diffs are split into directory groups and reviewed together. Line numbers refer to the new file and are best-effort.")
+        "Review a git diff and print AI line comments. Defaults to staged changes, with the review agent on. Pass --no-agent to turn the agent off. Use --branch for default-branch...HEAD. Large diffs are split into directory groups and reviewed together. Line numbers refer to the new file and are best-effort.")
     {
         Option<string?> fromOption = new("--from")
         {
@@ -52,11 +52,16 @@ public class ReviewCommand : Command
         };
         Option<bool> agentOption = new("--agent")
         {
-            Description = "Opt in to a review agent that can read files, search the repository, and print a short status before answering. Off by default. Large diffs run one agent per group."
+            Description = "Review with an agent that can read files, search the repository, and print a short status before answering. On by default. Large diffs run one agent per group.",
+            DefaultValueFactory = _ => true
+        };
+        Option<bool> noAgentOption = new("--no-agent")
+        {
+            Description = "Turn the review agent off. The diff is reviewed without file reads, code search, progress lines, or skills. Not with --agent."
         };
         Option<string?> maxRoundsOption = new("--max-rounds")
         {
-            Description = "Maximum agent tool rounds (1-40). Overrides maxreviewrounds. Used only with --agent.",
+            Description = "Maximum agent tool rounds (1-40). Overrides maxreviewrounds. With --no-agent, a valid value is ignored after a note on stderr.",
             HelpName = "n"
         };
         Option<int?> concurrencyOption = new("--concurrency")
@@ -88,6 +93,7 @@ public class ReviewCommand : Command
         Options.Add(backgroundOption);
         Options.Add(formatOption);
         Options.Add(agentOption);
+        Options.Add(noAgentOption);
         Options.Add(maxRoundsOption);
         Options.Add(concurrencyOption);
         Options.Add(timeoutOption);
@@ -124,7 +130,12 @@ public class ReviewCommand : Command
             }
 
             var background = parseResult.GetValue(backgroundOption);
-            var agentEnabled = parseResult.GetValue(agentOption);
+            if (!TryResolveAgent(parseResult, out var agentEnabled, out var agentError))
+            {
+                Console.Error.WriteLine(agentError);
+                return 1;
+            }
+
             var preview = parseResult.GetValue(previewOption);
             if (!TryParseMaxRounds(parseResult.GetValue(maxRoundsOption), out var maxRoundsCli, out var maxRoundsError))
             {
@@ -626,6 +637,27 @@ public class ReviewCommand : Command
                 return 1;
             }
         });
+    }
+
+    internal static bool TryResolveAgent(ParseResult parseResult, out bool enabled, out string error)
+    {
+        var options = parseResult.CommandResult.Command.Options;
+        var agentOption = options.Single(option => option.Name == "--agent");
+        var noAgentOption = options.Single(option => option.Name == "--no-agent");
+        var agentSpecified = parseResult.GetResult(agentOption) is { Implicit: false };
+        var noAgentSpecified = parseResult.GetResult(noAgentOption) is { Implicit: false };
+        if (agentSpecified && noAgentSpecified)
+        {
+            enabled = false;
+            error = "Error: --no-agent cannot be combined with --agent.";
+            return false;
+        }
+
+        enabled = noAgentSpecified
+            ? !parseResult.GetValue<bool>("--no-agent")
+            : parseResult.GetValue<bool>("--agent");
+        error = "";
+        return true;
     }
 
     internal static bool TryParseTarget(ParseResult parseResult, out ReviewTarget target, out string error)
