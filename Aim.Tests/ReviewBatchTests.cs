@@ -129,6 +129,23 @@ public class ReviewBatchTests
     }
 
     [Fact]
+    public async Task AnEmptyModelTurnIsAParseErrorWithoutARawResponse()
+    {
+        var groups = new[] { Group(1) };
+        var result = await ReviewBatch.RunAsync(
+            groups,
+            new ReviewBatchRequest { Concurrency = 1, GroupTimeout = TimeSpan.FromSeconds(2), MaxComments = 20 },
+            (_, _) => throw new ReviewModelEmptyException("The model returned an empty response (finish_reason: length)."),
+            CancellationToken.None);
+
+        Assert.False(result.AnySuccess);
+        var outcome = Assert.Single(result.Outcomes);
+        Assert.Equal(ReviewGroupStatus.ParseError, outcome.Status);
+        Assert.Equal("The model returned an empty response (finish_reason: length).", outcome.Error);
+        Assert.Equal("", outcome.Raw);
+    }
+
+    [Fact]
     public async Task DedupesCommentsFromSeparateGroups()
     {
         var groups = new[] { Group(1), Group(2) };

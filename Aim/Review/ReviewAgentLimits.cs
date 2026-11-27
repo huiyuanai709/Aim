@@ -11,6 +11,11 @@ internal static class ReviewAgentLimits
     // spend that message on a plan. Each recovery is another turn on the same session.
     public const int MaxJsonRecoveries = 3;
 
+    // A turn with no assistant text and no tool call, or a model call that returned
+    // no message at all. Separate from the prose budget so a blank reply does not
+    // use up the planning recoveries. Each recovery is another turn on the same session.
+    public const int MaxEmptyRecoveries = 3;
+
     public static bool TryResolveRounds(int? fromCli, int configured, bool agentEnabled, out int rounds, out string? note, out string error)
     {
         note = null;

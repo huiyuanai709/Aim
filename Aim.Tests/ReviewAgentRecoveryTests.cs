@@ -214,8 +214,249 @@ public class ReviewAgentRecoveryTests
         Assert.Equal("", progress.ToString());
     }
 
+    [Fact]
+    public async Task EmptyAssistantMessageAfterAToolCallContinuesTheSameThread()
+    {
+        using var repo = new TempRepo();
+        repo.Write("src/IcbcConfig.java", "class IcbcConfig { String merchantId; }\n");
+        repo.Git("add", ".");
+        repo.Git("commit", "-m", "init");
+
+        var read = new ChatMessage(ChatRole.Assistant, [new FunctionCallContent(
+            "call_read",
+            "file_read",
+            new Dictionary<string, object?>
+            {
+                ["path"] = "src/IcbcConfig.java",
+                ["start_line"] = 1,
+                ["end_line"] = 1
+            })]);
+        var json = """
+            [{"path":"src/IcbcConfig.java","start_line":1,"end_line":1,"severity":"medium","category":"bug","content":"The merchant id is copied without a null check."}]
+            """;
+        var script = new ScriptedChatClient(
+            () => new ChatResponse(read),
+            () => new ChatResponse(new ChatMessage(ChatRole.Assistant, ""))
+            {
+                FinishReason = ChatFinishReason.Stop
+            },
+            () => new ChatResponse(new ChatMessage(ChatRole.Assistant, json)));
+        var progress = new StringWriter();
+
+        var raw = await ReviewAgent.CompleteAsync(
+            Request(progress, repo.Path),
+            UserPrompt,
+            CancellationToken.None,
+            script);
+        var parsed = ReviewCommentParser.Parse(raw, 20);
+
+        Assert.True(parsed.Success, parsed.Error);
+        Assert.Equal(json, raw);
+        Assert.Equal(3, script.Requests.Count);
+        Assert.Equal(1, CountText(script.Requests[2], ReviewPrompt.EmptyContinuation));
+        Assert.Equal(0, CountText(script.Requests[2], ReviewPrompt.JsonContinuation));
+        var continuedRead = script.Requests[2]
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionResultContent>()
+            .Select(result => result.Result?.ToString() ?? "");
+        Assert.Contains(continuedRead, result => result.Contains("merchantId", StringComparison.Ordinal));
+        var log = progress.ToString();
+        Assert.Contains("▶ file_read src/IcbcConfig.java", log, StringComparison.Ordinal);
+        Assert.Contains(
+            "▶ The model returned an empty response (finish_reason: stop). Continuing the review.",
+            log,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(ReviewPrompt.JsonContinuation, log, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReasoningOnlyAssistantMessageIsAnEmptyTurn()
+    {
+        var json = """
+            [{"path":"src/IcbcConfig.java","start_line":1,"end_line":1,"severity":"low","category":"maintainability","content":"The field is never read."}]
+            """;
+        var script = new ScriptedChatClient(
+            () => new ChatResponse(new ChatMessage(ChatRole.Assistant, [new TextReasoningContent("Looking at the merchant id.")])),
+            () => new ChatResponse(new ChatMessage(ChatRole.Assistant, json)));
+        var progress = new StringWriter();
+
+        var raw = await ReviewAgent.CompleteAsync(Request(progress), UserPrompt, CancellationToken.None, script);
+        var parsed = ReviewCommentParser.Parse(raw, 20);
+
+        Assert.True(parsed.Success, parsed.Error);
+        Assert.Equal(json, raw);
+        Assert.Equal(2, script.Requests.Count);
+        Assert.Equal(1, CountText(script.Requests[1], ReviewPrompt.EmptyContinuation));
+        Assert.Equal(0, CountText(script.Requests[1], ReviewPrompt.JsonContinuation));
+        Assert.DoesNotContain("Looking at the merchant id.", progress.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EmptyPayloadAfterAToolCallContinuesTheSameThread()
+    {
+        using var repo = new TempRepo();
+        repo.Write("src/IcbcConfig.java", "class IcbcConfig { String merchantId; }\n");
+        repo.Git("add", ".");
+        repo.Git("commit", "-m", "init");
+
+        var read = new ChatMessage(ChatRole.Assistant, [new FunctionCallContent(
+            "call_read",
+            "file_read",
+            new Dictionary<string, object?> { ["path"] = "src/IcbcConfig.java" })]);
+        var json = """
+            [{"path":"src/IcbcConfig.java","start_line":1,"end_line":1,"severity":"high","category":"security","content":"The merchant id is written into the query string."}]
+            """;
+        var script = new ScriptedChatClient(
+            () => new ChatResponse(read),
+            () => throw new ArgumentOutOfRangeException("index"),
+            () => new ChatResponse(new ChatMessage(ChatRole.Assistant, json)));
+        var progress = new StringWriter();
+
+        var raw = await ReviewAgent.CompleteAsync(
+            Request(progress, repo.Path),
+            UserPrompt,
+            CancellationToken.None,
+            script);
+        var parsed = ReviewCommentParser.Parse(raw, 20);
+
+        Assert.True(parsed.Success, parsed.Error);
+        Assert.Equal(json, raw);
+        Assert.Equal(3, script.Requests.Count);
+        Assert.Equal(1, CountText(script.Requests[2], ReviewPrompt.EmptyContinuation));
+        Assert.Contains(
+            script.Requests[2].SelectMany(message => message.Contents).OfType<FunctionResultContent>(),
+            result => (result.Result?.ToString() ?? "").Contains("merchantId", StringComparison.Ordinal));
+        Assert.Contains(
+            "▶ The model returned an empty response (empty payload). Continuing the review.",
+            progress.ToString(),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("finish_reason", progress.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EmptyCommentArrayAfterAnEmptyTurnIsAFinishedReview()
+    {
+        var script = new ScriptedChatClient(
+            () => new ChatResponse(new ChatMessage(ChatRole.Assistant, "")),
+            () => new ChatResponse(new ChatMessage(ChatRole.Assistant, "[]")));
+        var progress = new StringWriter();
+
+        var raw = await ReviewAgent.CompleteAsync(Request(progress), UserPrompt, CancellationToken.None, script);
+        var parsed = ReviewCommentParser.Parse(raw, 20);
+
+        Assert.True(parsed.Success, parsed.Error);
+        Assert.Empty(parsed.Comments);
+        Assert.Equal("[]", raw);
+        Assert.Equal(2, script.Requests.Count);
+        Assert.Equal(1, CountText(script.Requests[1], ReviewPrompt.EmptyContinuation));
+    }
+
+    [Fact]
+    public async Task EmptyTurnThenPlanningProseStillUsesTheJsonContinuation()
+    {
+        var json = """
+            [{"path":"a.cs","start_line":1,"end_line":1,"severity":"low","category":"style","content":"The name hides which amount is refunded."}]
+            """;
+        var script = new ScriptedChatClient(
+            () => new ChatResponse(new ChatMessage(ChatRole.Assistant, "")),
+            () => new ChatResponse(new ChatMessage(ChatRole.Assistant, PlanningProse)),
+            () => new ChatResponse(new ChatMessage(ChatRole.Assistant, json)));
+        var progress = new StringWriter();
+
+        var raw = await ReviewAgent.CompleteAsync(Request(progress), UserPrompt, CancellationToken.None, script);
+        var parsed = ReviewCommentParser.Parse(raw, 20);
+
+        Assert.True(parsed.Success, parsed.Error);
+        Assert.Equal(json, raw);
+        Assert.Equal(3, script.Requests.Count);
+        Assert.Equal(1, CountText(script.Requests[1], ReviewPrompt.EmptyContinuation));
+        Assert.Equal(0, CountText(script.Requests[1], ReviewPrompt.JsonContinuation));
+        Assert.Equal(1, CountText(script.Requests[2], PlanningProse));
+        Assert.Equal(1, CountText(script.Requests[2], ReviewPrompt.JsonContinuation));
+        Assert.Contains("▶ " + PlanningProse, progress.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EmptyAssistantMessagesUntilTheCapFailWithTheFinishReason()
+    {
+        var empty = new ChatResponse(new ChatMessage(ChatRole.Assistant, " \n "))
+        {
+            FinishReason = ChatFinishReason.Length
+        };
+        var replies = new Func<ChatResponse>[ReviewAgentLimits.MaxEmptyRecoveries + 1];
+        for (var i = 0; i < replies.Length; i++)
+            replies[i] = () => empty;
+        var script = new ScriptedChatClient(replies);
+        var progress = new StringWriter();
+
+        var ex = await Assert.ThrowsAsync<ReviewModelEmptyException>(() =>
+            ReviewAgent.CompleteAsync(Request(progress), UserPrompt, CancellationToken.None, script));
+
+        Assert.Equal("The model returned an empty response (finish_reason: length).", ex.Message);
+        Assert.Equal(1 + ReviewAgentLimits.MaxEmptyRecoveries, script.Requests.Count);
+        Assert.Equal(
+            ReviewAgentLimits.MaxEmptyRecoveries,
+            script.Requests.Count(messages => CountText(messages, ReviewPrompt.EmptyContinuation) > 0));
+        Assert.Equal(0, CountAll(script, ReviewPrompt.JsonContinuation));
+        var lines = progress.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(ReviewAgentLimits.MaxEmptyRecoveries, lines.Length);
+        Assert.All(lines, line => Assert.Equal(
+            "▶ The model returned an empty response (finish_reason: length). Continuing the review.",
+            line));
+    }
+
+    [Fact]
+    public async Task EmptyAssistantMessagesWithoutAFinishReasonKeepThePlainError()
+    {
+        var replies = new Func<ChatResponse>[ReviewAgentLimits.MaxEmptyRecoveries + 1];
+        for (var i = 0; i < replies.Length; i++)
+            replies[i] = () => new ChatResponse(new ChatMessage(ChatRole.Assistant, ""));
+        var script = new ScriptedChatClient(replies);
+
+        var ex = await Assert.ThrowsAsync<ReviewModelEmptyException>(() =>
+            ReviewAgent.CompleteAsync(Request(TextWriter.Null), UserPrompt, CancellationToken.None, script));
+
+        Assert.Equal("The model returned an empty response.", ex.Message);
+    }
+
+    [Fact]
+    public async Task EmptyPayloadsUntilTheCapFailWithoutInventingAFinishReason()
+    {
+        var replies = new Func<ChatResponse>[ReviewAgentLimits.MaxEmptyRecoveries + 1];
+        for (var i = 0; i < replies.Length; i++)
+            replies[i] = () => new ChatResponse();
+        var script = new ScriptedChatClient(replies);
+        var progress = new StringWriter();
+
+        var ex = await Assert.ThrowsAsync<ReviewModelEmptyException>(() =>
+            ReviewAgent.CompleteAsync(Request(progress), UserPrompt, CancellationToken.None, script));
+
+        Assert.Equal("The model returned an empty response (empty payload).", ex.Message);
+        Assert.DoesNotContain("finish_reason", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(1 + ReviewAgentLimits.MaxEmptyRecoveries, script.Requests.Count);
+        Assert.Contains(
+            "▶ The model returned an empty response (empty payload). Continuing the review.",
+            progress.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnOrdinaryModelFailureIsNotRetriedAsAnEmptyPayload()
+    {
+        var script = new ScriptedChatClient(() => throw new InvalidOperationException("endpoint down"));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ReviewAgent.CompleteAsync(Request(TextWriter.Null), UserPrompt, CancellationToken.None, script));
+
+        Assert.Equal("endpoint down", ex.Message);
+        Assert.Single(script.Requests);
+    }
+
     private static int CountText(IReadOnlyList<ChatMessage> messages, string text) =>
         messages.Count(message => message.Text.Contains(text, StringComparison.Ordinal));
+
+    private static int CountAll(ScriptedChatClient script, string text) =>
+        script.Requests.Sum(messages => CountText(messages, text));
 
     private static ReviewAgentRequest Request(TextWriter progress, string? directory = null) => new()
     {
@@ -231,11 +472,16 @@ public class ReviewAgentRecoveryTests
 
     private sealed class ScriptedChatClient : IChatClient
     {
-        private readonly Queue<ChatMessage> _responses;
+        private readonly Queue<Func<ChatResponse>> _responses;
 
         public ScriptedChatClient(params ChatMessage[] responses)
+            : this(responses.Select(static message => (Func<ChatResponse>)(() => new ChatResponse(message))).ToArray())
         {
-            _responses = new Queue<ChatMessage>(responses);
+        }
+
+        public ScriptedChatClient(params Func<ChatResponse>[] responses)
+        {
+            _responses = new Queue<Func<ChatResponse>>(responses);
         }
 
         public List<IReadOnlyList<ChatMessage>> Requests { get; } = [];
@@ -249,7 +495,7 @@ public class ReviewAgentRecoveryTests
             if (_responses.Count == 0)
                 throw new InvalidOperationException("The scripted chat client ran out of responses.");
 
-            return Task.FromResult(new ChatResponse(_responses.Dequeue()));
+            return Task.FromResult(_responses.Dequeue()());
         }
 
         public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(

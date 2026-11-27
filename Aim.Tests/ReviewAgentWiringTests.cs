@@ -26,6 +26,7 @@ public class ReviewAgentWiringTests
         Assert.NotNull(invoking);
         Assert.Equal(6, invoking.MaximumIterationsPerRequest);
         Assert.NotNull(agent.ChatClient.GetService<LeakedToolCallChatClient>());
+        Assert.NotNull(agent.ChatClient.GetService<EmptyPayloadChatClient>());
         Assert.False(invoking.AllowConcurrentInvocation);
 
         var names = RegisteredToolNames(agent);
