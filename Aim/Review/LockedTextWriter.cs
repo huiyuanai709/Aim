@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace Aim;
@@ -57,5 +58,24 @@ internal sealed class LockedTextWriter : TextWriter
     {
         lock (_gate)
             _inner.WriteLine(value);
+    }
+}
+
+/// <summary>
+/// One lock per <see cref="TextWriter"/> instance, shared by every tool that writes progress to it.
+/// A line and its flush stay together when several tools in one turn, or several groups, write at once.
+/// </summary>
+internal static class ProgressLog
+{
+    private static readonly ConditionalWeakTable<TextWriter, object> Gates = new();
+
+    public static void WriteLine(TextWriter writer, string line)
+    {
+        var gate = Gates.GetValue(writer, static _ => new object());
+        lock (gate)
+        {
+            writer.WriteLine(line);
+            writer.Flush();
+        }
     }
 }

@@ -17,6 +17,7 @@ internal sealed class ReviewTools
     private readonly string? _revision;
     private readonly int _maxChars;
     private readonly TextWriter _progress;
+    private readonly object _rootGate = new();
     private string? _repoRoot;
 
     public ReviewTools(string workingDirectory, string? revision, int maxChars, TextWriter? progress = null)
@@ -42,7 +43,7 @@ internal sealed class ReviewTools
             TypeInfoResolver = ReviewToolJsonContext.Default
         };
         AIFunction fileRead = AIFunctionFactory.Create(
-            FileRead,
+            FileReadTool,
             new AIFunctionFactoryOptions
             {
                 Name = "file_read",
@@ -50,7 +51,7 @@ internal sealed class ReviewTools
                 SerializerOptions = serializer
             });
         AIFunction codeSearch = AIFunctionFactory.Create(
-            CodeSearch,
+            CodeSearchTool,
             new AIFunctionFactoryOptions
             {
                 Name = "code_search",
@@ -58,7 +59,7 @@ internal sealed class ReviewTools
                 SerializerOptions = serializer
             });
         AIFunction reportProgress = AIFunctionFactory.Create(
-            ReportProgress,
+            ReportProgressTool,
             new AIFunctionFactoryOptions
             {
                 Name = "report_progress",
@@ -67,6 +68,23 @@ internal sealed class ReviewTools
             });
         return [fileRead, codeSearch, reportProgress];
     }
+
+    // Queue the blocking body so the function loop can start every call in a same-turn batch
+    // before the first git or ngrep call returns. A synchronous tool runs inline and holds the batch.
+    private Task<string> FileReadTool(
+        [Description("Repo-relative path using forward slashes.")] string path,
+        [Description("Optional 1-based first line.")] int? start_line = null,
+        [Description("Optional 1-based last line, inclusive.")] int? end_line = null) =>
+        Task.Run(() => FileRead(path, start_line, end_line));
+
+    private Task<string> CodeSearchTool(
+        [Description("Fixed string to find. Not a regular expression.")] string query,
+        [Description("Optional repo-relative directory or file.")] string? path = null) =>
+        Task.Run(() => CodeSearch(query, path));
+
+    private Task<string> ReportProgressTool(
+        [Description("One short status sentence. Plain language, matching the code, its comments, and the user context.")] string message) =>
+        Task.Run(() => ReportProgress(message));
 
     internal string FileRead(
         [Description("Repo-relative path using forward slashes.")] string path,
@@ -178,11 +196,7 @@ internal sealed class ReviewTools
         return "Noted. This does not submit a review comment.";
     }
 
-    private void WriteProgress(string line)
-    {
-        _progress.WriteLine(line);
-        _progress.Flush();
-    }
+    private void WriteProgress(string line) => ProgressLog.WriteLine(_progress, line);
 
     internal static bool TrySanitizeProgress(string? message, out string status)
     {
@@ -270,11 +284,14 @@ internal sealed class ReviewTools
 
     private bool TryRoot(out string root, out string error)
     {
-        if (_repoRoot is not null)
+        lock (_rootGate)
         {
-            root = _repoRoot;
-            error = "";
-            return true;
+            if (_repoRoot is not null)
+            {
+                root = _repoRoot;
+                error = "";
+                return true;
+            }
         }
 
         var (ok, output, err) = GitExecutor.RunGit(["rev-parse", "--show-toplevel"], _workingDirectory);
@@ -285,8 +302,13 @@ internal sealed class ReviewTools
             return false;
         }
 
-        _repoRoot = output.Trim();
-        root = _repoRoot;
+        var resolved = output.Trim();
+        lock (_rootGate)
+        {
+            _repoRoot ??= resolved;
+            root = _repoRoot;
+        }
+
         error = "";
         return true;
     }

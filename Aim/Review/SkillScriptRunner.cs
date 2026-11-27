@@ -36,11 +36,11 @@ internal sealed class SkillScriptRunner
         _ = serviceProvider;
         if (!TryPrepare(skill, script, arguments, out var launch, out var scriptPath, out var args, out var error))
         {
-            _progress.WriteLine("▶ run_skill_script (rejected)");
+            ProgressLog.WriteLine(_progress, "▶ run_skill_script (rejected)");
             return error;
         }
 
-        _progress.WriteLine($"▶ run_skill_script {skill.Frontmatter.Name} {script.Name}");
+        ProgressLog.WriteLine(_progress, $"▶ run_skill_script {skill.Frontmatter.Name} {script.Name}");
         return await ExecuteAsync(launch, scriptPath, skill.Path, args, cancellationToken).ConfigureAwait(false);
     }
 
