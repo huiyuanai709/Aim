@@ -15,7 +15,7 @@ AIM is a command-line tool that leverages AI to generate meaningful, semantic co
 - 🔄 **Auto-commit**: Optional automatic commit after message generation
 - 📝 **Amend Support**: Generate messages for amending previous commits
 - 🔍 **Diff review**: `aim review` prints line comments for staged changes, a triple-dot range, the current branch against the default branch, or one commit. Large diffs are split into directory groups and reviewed together
-- 🛠️ **Optional review agent**: `--agent` can read files, search the repo, and print a short status before it answers. Off unless you ask for it
+- 🛠️ **Review agent**: `aim review` reads files, searches the repo, and prints a short status before it answers. On by default. `--no-agent` turns it off
 - 🔎 **Code search**: `aim search` runs [ngrep](https://github.com/huiyuanai709/ngrep) in-process, including its SIMD scanners and `.ngrep/index`
 - 🎨 **Clean Output**: Beautiful, readable console output
 
@@ -103,8 +103,9 @@ Review a diff and print AI line comments. The default input is staged changes (`
 - `--rule <file>`: extra rules text, appended to the built-in checklist.
 - `--background "..."`: extra product context for the model.
 - `--format text|json`: human-readable text (default) or a JSON array of comments.
-- `--agent`: opt in to a Microsoft Agent Framework review agent (`ChatClientAgent`) that may call `file_read`, `code_search`, and `report_progress`, and load file-based skills, before the final answer. Off by default. The final answer is still the same JSON comment array.
-- `--max-rounds <n>`: cap agent tool rounds (1–40). Overrides `maxreviewrounds`. Without `--agent`, a valid value is ignored after a note on stderr.
+- `--agent`: use a Microsoft Agent Framework review agent (`ChatClientAgent`) that may call `file_read`, `code_search`, and `report_progress`, and load file-based skills, before the final answer. On by default. The final answer is still the same JSON comment array.
+- `--no-agent`: turn the review agent off. The diff is reviewed without those tools. Not with `--agent`.
+- `--max-rounds <n>`: cap agent tool rounds (1–40). Overrides `maxreviewrounds`. With `--no-agent`, a valid value is ignored after a note on stderr.
 - `--concurrency <n>`: how many groups to review at the same time when a diff is split (1–32). Default: `8`, or `reviewconcurrency`.
 - `--timeout <minutes>`: optional limit on each review call, in minutes (1–60). Pass `0` for no limit. Default: no limit. When the flag is omitted, `reviewtimeoutminutes` is used (`0` means no limit). A positive limit also raises the HTTP timeout above the OpenAI client's about 100 second default.
 - `--max-tokens-budget <n>`: optional cap on how much diff text is sent. Aim estimates tokens as the group diff length divided by 4. The first group is always sent. Aim does not start a later group when the estimate would pass this number. Comments from the groups that finished are still printed.
@@ -114,7 +115,7 @@ Line numbers refer to the **new file** in the diff. Aim writes those numbers ont
 
 A diff that already fits in one model call stays one call. That is true when `maxdiffchars` is greater than 0 and the whole diff fits in that budget (default `80000`), or when `maxdiffchars` is `0` and the diff has at most 10 files. Splitting those reviews would add calls without covering more of the diff.
 
-A larger diff is split by directory. Each group has at most 10 files. When `maxdiffchars` is greater than 0, each group also stays within that many characters. The groups run at the same time. `--agent` uses the same groups, the same concurrency, and the same timeout. When a timeout is set, it covers every tool round in that group. With no timeout, a group is not stopped for taking too long.
+A larger diff is split by directory. Each group has at most 10 files. When `maxdiffchars` is greater than 0, each group also stays within that many characters. The groups run at the same time, for the review agent and for `--no-agent`. When a timeout is set, it covers every tool round in that group. With no timeout, a group is not stopped for taking too long.
 
 A single file longer than 80% of `maxdiffchars` is skipped. Aim prints a warning on stderr and reviews the other files. One oversized file does not fail the run. If every file is oversized, the command exits with code 1. `maxdiffchars` of `0` does not skip files for size; a review with more than 10 files is still grouped by directory.
 
@@ -124,7 +125,7 @@ Comments from every finished group are combined. Duplicates are removed. `maxrev
 
 Each comment has `path`, `start_line`, `end_line`, `severity` (`critical`, `high`, `medium`, `low`), `category` (`bug`, `security`, `performance`, `maintainability`, `style`, `other`), `content`, and an optional `suggestion_code`. At most `maxreviewcomments` comments are printed (default 20). Set `reviewmodel` when review should use a different model than `model`.
 
-With `--agent`, each group gets its own agent. A one-call review still uses one agent. The agent may call these tools before that JSON array:
+By default, each group gets its own agent. A one-call review still uses one agent. `--no-agent` sends the same groups without tools. The agent may call these tools before that JSON array:
 
 - `file_read` reads a repo-relative file. For `--commit` or `--first-commit`, it uses `git show` of that commit. For `--from`/`--to` or `--branch`, it uses `git show` of the head ref (`--to`, or `HEAD` for `--branch`). A staged review reads the working tree. Paths must stay inside the repository. A read returns at most 200 lines.
 - `code_search` finds a fixed string (not a shell command and not a regular expression) and returns at most 80 lines. A worktree review searches with ngrep and stops at that cap. That includes untracked files that are not ignored. If `.ngrep/index` already exists it is used; otherwise ngrep scans. Aim does not build the index for you. A `--commit` or range review (`--from`/`--to`, `--branch`) uses `git grep` on that revision, because ngrep reads the filesystem and not a historical git tree.
@@ -138,7 +139,7 @@ If the model stops on planning or status prose instead of the JSON array, Aim pr
 
 If a turn has no assistant text and no tool call, or the API returns no message at all, Aim stays on that same conversation and asks again. That retry is bounded separately from the prose continuation. `[]` is a finished review with nothing to report, not an empty response. If the empty replies continue, the review fails. When the API sent a finish reason, or the body had no message, the error says so.
 
-With `--agent`, Aim also registers a Microsoft Agent Framework `AgentSkillsProvider` when it finds skill directories. Discovery order is:
+Aim also registers a Microsoft Agent Framework `AgentSkillsProvider` when the review agent is on and it finds skill directories. `--no-agent` does not load skills. Discovery order is:
 
 1. Paths in the repository's `.aim/config.json` (`skills`, then `skillspaths`). Each value may be a string or an array of strings. A string is split on `;`. Relative paths are relative to the git repository root.
 2. `skillspaths` in Aim's user `config.ini`, also semicolon-separated.
@@ -146,7 +147,7 @@ With `--agent`, Aim also registers a Microsoft Agent Framework `AgentSkillsProvi
 
 Duplicate directories are skipped. The first skill name wins. A missing configured path is a warning on stderr; a missing default directory is ignored. Each directory is scanned for `SKILL.md` files (a skill folder directly under the directory).
 
-`load_skill`, `read_skill_resource`, and `run_skill_script` do not ask for a second approval when `--agent` is on. Aim discovers `.py`, `.sh`, `.js`, `.cs`, and `.csx` scripts under the skill directory. The script path is passed on the process argument list, not through a shell. The working directory is the skill directory. Microsoft Agent Framework rejects script paths that leave that directory, including symlink escapes, and Aim checks the path again before starting the process.
+`load_skill`, `read_skill_resource`, and `run_skill_script` do not ask for a second approval. Aim discovers `.py`, `.sh`, `.js`, `.cs`, and `.csx` scripts under the skill directory. The script path is passed on the process argument list, not through a shell. The working directory is the skill directory. Microsoft Agent Framework rejects script paths that leave that directory, including symlink escapes, and Aim checks the path again before starting the process.
 
 When the file has no shebang, the extension selects the command:
 
@@ -161,7 +162,7 @@ The C# command is the .NET 11 file-based app host. Arguments after `--` are for 
 
 If the first line starts with `#!`, that interpreter is used instead of the table. Aim parses the line the way the kernel does: an absolute interpreter path, one optional argument, then the script path, then the user arguments. `#!/bin/sh` and `#!/usr/bin/env dotnet` are both accepted. The interpreter must exist, must be absolute, and must not contain `..`. A relative shebang is rejected.
 
-This is not a container. A script runs as your user, inherits the environment, and can read files or use the network. Output is capped by `maxtoolresultchars`, and the process is stopped after 20 seconds, including C# compile time. Only point `--agent` at skill directories you trust. Other script types, including `.ps1`, are not run.
+This is not a container. A script runs as your user, inherits the environment, and can read files or use the network. Output is capped by `maxtoolresultchars`, and the process is stopped after 20 seconds, including C# compile time. Only point the review agent at skill directories you trust. Other script types, including `.ps1`, are not run.
 
 ```text
 .aim/skills/explicit-errors/SKILL.md
@@ -227,8 +228,11 @@ aim review --commit HEAD
 # JSON for scripts
 aim review --format json
 
-# Let the agent read files and search before answering
-aim review --agent --max-rounds 8
+# The review agent is on by default. Cap its tool rounds.
+aim review --max-rounds 8
+
+# Review the diff without tools
+aim review --no-agent
 
 # See which files and groups would be reviewed, without calling the model
 aim review --branch --preview
@@ -240,7 +244,7 @@ aim review --branch --concurrency 8
 aim review --branch --max-tokens-budget 80000
 
 # The agent uses the same groups. Pass --timeout to cap each group, in minutes.
-aim review --branch --agent --concurrency 4 --timeout 10
+aim review --branch --concurrency 4 --timeout 10
 
 # Product context and a local rules file
 aim review --background "Payments service. Prefer explicit errors." --rule ./REVIEW.md
@@ -296,9 +300,9 @@ Manage configuration settings.
 | `maxdiffchars` | Size budget. `aim commit` falls back to file names above this. `aim review` keeps each call or group within it and splits a larger diff by directory. `0` = no character cap | `80000` |
 | `reviewmodel` | Model for `aim review`. Empty uses `model` | _(empty)_ |
 | `maxreviewcomments` | Maximum review comments to print | `20` |
-| `maxreviewrounds` | Maximum `--agent` tool rounds | `10` |
+| `maxreviewrounds` | Maximum review agent tool rounds | `10` |
 | `maxtoolresultchars` | Maximum characters returned by one review tool | `12000` |
-| `skillspaths` | Extra `--agent` skill directories, separated by `;`. Relative paths use the repository root | _(empty)_ |
+| `skillspaths` | Extra review agent skill directories, separated by `;`. Relative paths use the repository root | _(empty)_ |
 | `reviewconcurrency` | Groups reviewed at the same time when a diff is split | `8` |
 | `reviewtimeoutminutes` | Minutes to wait for each review call. `0` means no limit. A positive value also raises the HTTP timeout | `0` |
 
@@ -316,7 +320,7 @@ aim config --set apikey=sk-... model=gpt-4o maxdiffchars=80000
 # Use a separate model for review and cap the comment count
 aim config --set reviewmodel=gpt-4o maxreviewcomments=20 maxreviewrounds=10 maxtoolresultchars=12000
 
-# Add skill directories for aim review --agent
+# Add skill directories for the review agent
 aim config --set skillspaths=/opt/team-skills;../shared-skills
 
 # Review at most four groups at once, and wait up to 10 minutes for each call
@@ -381,7 +385,7 @@ AIM generates commit messages following these conventions:
 
 - **.NET 11**: Native AOT compilation. Code search is the vendored [ngrep](https://github.com/huiyuanai709/ngrep) library (v0.20.0), SIMD scanners included
 - **OpenAI SDK**: Official OpenAI .NET library (v2.14.0)
-- **Microsoft Agent Framework**: `ChatClientAgent` for the optional `aim review --agent` tool loop, and `AgentSkillsProvider` for `SKILL.md` skills (v1.25.0). Microsoft.Extensions.AI is the chat client underneath that agent.
+- **Microsoft Agent Framework**: `ChatClientAgent` for the `aim review` tool loop (on by default; `--no-agent` turns it off), and `AgentSkillsProvider` for `SKILL.md` skills (v1.25.0). Microsoft.Extensions.AI is the chat client underneath that agent.
 - **System.CommandLine**: Modern command-line parsing (v2.0.12)
 - **Microsoft.Extensions.Configuration**: Robust configuration management
 

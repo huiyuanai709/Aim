@@ -92,6 +92,57 @@ public class ReviewCommandParseTests
     }
 
     [Fact]
+    public void AgentIsOnUnlessNoAgentIsPassed()
+    {
+        Assert.True(ReviewCommand.TryResolveAgent(Parse("review"), out var enabled, out var error), error);
+        Assert.True(enabled);
+
+        Assert.True(ReviewCommand.TryResolveAgent(Parse("review", "--agent"), out enabled, out error), error);
+        Assert.True(enabled);
+
+        Assert.True(ReviewCommand.TryResolveAgent(Parse("review", "--agent", "false"), out enabled, out error), error);
+        Assert.False(enabled);
+
+        var noAgent = Parse("review", "--no-agent", "--format", "json");
+        Assert.Empty(noAgent.Errors);
+        Assert.True(ReviewCommand.TryResolveAgent(noAgent, out enabled, out error), error);
+        Assert.False(enabled);
+        Assert.True(ReviewCommand.TryParseTarget(noAgent, out var target, out error), error);
+        Assert.Equal("json", target.Format);
+
+        Assert.False(ReviewCommand.TryResolveAgent(Parse("review", "--agent", "--no-agent"), out _, out error));
+        Assert.Contains("--no-agent", error, StringComparison.Ordinal);
+        Assert.Contains("--agent", error, StringComparison.Ordinal);
+
+        Assert.False(ReviewCommand.TryResolveAgent(Parse("review", "--no-agent", "--agent"), out _, out error));
+        Assert.Contains("cannot be combined", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HelpDescribesAgentAsOnByDefault()
+    {
+        var review = new ReviewCommand();
+        var agent = Assert.Single(review.Options, option => option.Name == "--agent");
+        Assert.Equal(true, agent.GetDefaultValue());
+        Assert.Contains("On by default", agent.Description, StringComparison.Ordinal);
+        Assert.Contains("read files", agent.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Off by default", agent.Description, StringComparison.Ordinal);
+        Assert.DoesNotContain("Opt in", agent.Description, StringComparison.OrdinalIgnoreCase);
+
+        var noAgent = Assert.Single(review.Options, option => option.Name == "--no-agent");
+        Assert.Equal(false, noAgent.GetDefaultValue());
+        Assert.Contains("Turn the review agent off", noAgent.Description, StringComparison.Ordinal);
+        Assert.Contains("Not with --agent", noAgent.Description, StringComparison.Ordinal);
+
+        var rounds = Assert.Single(review.Options, option => option.Name == "--max-rounds");
+        Assert.Contains("--no-agent", rounds.Description, StringComparison.Ordinal);
+        Assert.DoesNotContain("Used only with --agent", rounds.Description, StringComparison.Ordinal);
+
+        Assert.Contains("--no-agent", review.Description, StringComparison.Ordinal);
+        Assert.Contains("review agent on", review.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void HelpDescribesTimeoutAsUnlimitedByDefault()
     {
         var review = new ReviewCommand();

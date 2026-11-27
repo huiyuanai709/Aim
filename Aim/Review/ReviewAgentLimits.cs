@@ -30,7 +30,7 @@ internal static class ReviewAgentLimits
 
             rounds = cli;
             if (!agentEnabled)
-                note = "Note: --max-rounds applies only with --agent.";
+                note = "Note: --max-rounds applies only when the review agent is on. It is ignored with --no-agent.";
 
             error = "";
             return true;
