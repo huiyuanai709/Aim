@@ -27,7 +27,7 @@ public class ReviewAgentWiringTests
         Assert.Equal(6, invoking.MaximumIterationsPerRequest);
         Assert.NotNull(agent.ChatClient.GetService<LeakedToolCallChatClient>());
         Assert.NotNull(agent.ChatClient.GetService<EmptyPayloadChatClient>());
-        Assert.False(invoking.AllowConcurrentInvocation);
+        Assert.True(invoking.AllowConcurrentInvocation);
 
         var names = RegisteredToolNames(agent);
         Assert.Contains("file_read", names);
@@ -37,6 +37,9 @@ public class ReviewAgentWiringTests
         Assert.Contains("file_read", agent.Instructions);
         Assert.Contains("report_progress", agent.Instructions);
         Assert.Contains("half-sentence", agent.Instructions);
+        Assert.Contains("in one turn", agent.Instructions);
+        Assert.Contains("does not need a turn of its own", agent.Instructions);
+        Assert.True(ChatOptionsOf(agent).AllowMultipleToolCalls);
         Assert.DoesNotContain("load_skill", agent.Instructions);
         Assert.Equal("aim-review", agent.Name);
         Assert.Null(agent.AIContextProviders);
@@ -93,11 +96,16 @@ public class ReviewAgentWiringTests
 
     private static List<string> RegisteredToolNames(ChatClientAgent agent)
     {
+        var options = ChatOptionsOf(agent);
+        Assert.NotNull(options.Tools);
+        return options.Tools.Select(tool => tool.Name).ToList();
+    }
+
+    private static ChatOptions ChatOptionsOf(ChatClientAgent agent)
+    {
         var property = typeof(ChatClientAgent).GetProperty(
             "ChatOptions",
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        var options = Assert.IsAssignableFrom<ChatOptions>(property?.GetValue(agent));
-        Assert.NotNull(options.Tools);
-        return options.Tools.Select(tool => tool.Name).ToList();
+        return Assert.IsAssignableFrom<ChatOptions>(property?.GetValue(agent));
     }
 }

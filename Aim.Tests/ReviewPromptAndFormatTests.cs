@@ -53,6 +53,8 @@ public class ReviewPromptAndFormatTests
         Assert.Contains("code_search", prompt);
         Assert.Contains("report_progress", prompt);
         Assert.Contains("half-sentence", prompt);
+        Assert.Contains("in one turn", prompt);
+        Assert.Contains("does not need one of its own", prompt);
         Assert.Contains("only the JSON array", prompt);
         Assert.DoesNotContain("one group of a larger change", prompt);
 
@@ -62,6 +64,8 @@ public class ReviewPromptAndFormatTests
         Assert.Contains("report_progress", instructions);
         Assert.Contains("half-sentence", instructions);
         Assert.Contains("reading files, searching, loading a skill, or writing the final findings", instructions);
+        Assert.Contains("in one turn", instructions);
+        Assert.Contains("does not need a turn of its own", instructions);
         Assert.Contains("Do not assume Chinese or English", instructions);
         Assert.Contains("does not submit a comment", instructions);
         Assert.Contains("JSON array", instructions);
@@ -78,6 +82,7 @@ public class ReviewPromptAndFormatTests
         Assert.Contains("report_progress", withSkills);
         Assert.Contains("read_skill_resource", withSkills);
         Assert.Contains("run_skill_script", withSkills);
+        Assert.Contains("same turn", withSkills);
     }
 
     [Fact]

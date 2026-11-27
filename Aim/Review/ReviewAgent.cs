@@ -47,10 +47,15 @@ internal static class ReviewAgent
                 Description = "Reviews a git diff and can read files, search the repository, report a short status, and load review skills before answering.",
                 ChatOptions = new ChatOptions
                 {
+                    // Ask the provider to allow more than one tool call in a response. A provider may ignore this.
+                    AllowMultipleToolCalls = true,
                     Instructions = ReviewPrompt.AgentInstructions(request.NameOnly, skills: skills is not null),
                     Tools = functions
                 },
-                AllowConcurrentInvocation = false,
+                // Copied onto the FunctionInvokingChatClient created below. That client runs every
+                // function call from one model response together. This does not make RunAsync concurrent;
+                // each review group already has its own agent.
+                AllowConcurrentInvocation = true,
                 AIContextProviders = skills is null ? null : [skills]
             };
 
@@ -63,7 +68,9 @@ internal static class ReviewAgent
             if (agent.ChatClient.GetService<FunctionInvokingChatClient>() is { } invoking)
             {
                 invoking.MaximumIterationsPerRequest = request.MaxRounds;
-                invoking.AllowConcurrentInvocation = false;
+                // This is the switch the function loop reads. Set it here as well as on the agent
+                // options: Aim adjusts this client after AsAIAgent builds it.
+                invoking.AllowConcurrentInvocation = true;
                 invoking.IncludeDetailedErrors = false;
             }
 
@@ -102,7 +109,7 @@ internal static class ReviewAgent
 
     private const string SkillsPrompt =
         """
-        Review skills are available. When one matches the diff, call load_skill, then read_skill_resource for a listed file. You may call run_skill_script for a listed .py, .sh, .js, .cs, or .csx script. It runs on this machine, in the skill directory, with the arguments you pass.
+        Review skills are available. When one matches the diff, call load_skill, then read_skill_resource for a listed file. You may call run_skill_script for a listed .py, .sh, .js, .cs, or .csx script. It runs on this machine, in the skill directory, with the arguments you pass. Independent load_skill, read_skill_resource, and run_skill_script calls can share a turn with file_read and code_search when none of them needs another's result.
         <available_skills>
         {skills}
         </available_skills>
@@ -263,8 +270,7 @@ internal static class ReviewAgent
         if (progress is null)
             return;
 
-        progress.WriteLine("▶ " + status);
-        progress.Flush();
+        ProgressLog.WriteLine(progress, "▶ " + status);
     }
 
     private static void WritePlanningStatus(TextWriter? progress, string text)
@@ -272,8 +278,7 @@ internal static class ReviewAgent
         if (progress is null || !ReviewTools.TrySanitizeProgress(text, out var excerpt))
             return;
 
-        progress.WriteLine("▶ " + excerpt);
-        progress.Flush();
+        ProgressLog.WriteLine(progress, "▶ " + excerpt);
     }
 }
 

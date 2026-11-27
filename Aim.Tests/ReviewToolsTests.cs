@@ -341,6 +341,77 @@ public class ReviewToolsTests
         }
     }
 
+    [Fact]
+    public async Task ConcurrentReadsSearchesAndStatusStayIntact()
+    {
+        using var repo = new TempRepo();
+        repo.Write("a.txt", "alpha-token\n");
+        repo.Write("b.txt", "beta-token\n");
+        repo.Git("add", ".");
+        repo.Git("commit", "-m", "init");
+        repo.Write("c.txt", "worktree-token\n");
+
+        var progress = new StringWriter();
+        var work = new ReviewTools(repo.Path, revision: null, maxChars: 12_000, progress);
+        var at = new ReviewTools(repo.Path, "HEAD", 12_000, progress);
+        var errors = new List<string>();
+        var gate = new object();
+
+        void Check(bool ok, string detail)
+        {
+            if (ok)
+                return;
+            lock (gate)
+                errors.Add(detail);
+        }
+
+        Parallel.For(0, 8, _ =>
+        {
+            var read = work.FileRead("a.txt");
+            Check(read.Contains("alpha-token", StringComparison.Ordinal), "read " + read);
+            var other = work.FileRead("b.txt");
+            Check(other.Contains("beta-token", StringComparison.Ordinal) && !other.Contains("alpha-token", StringComparison.Ordinal), "other " + other);
+
+            var alpha = work.CodeSearch("alpha-token");
+            Check(alpha.Contains("a.txt:", StringComparison.Ordinal) && !alpha.Contains("worktree-token", StringComparison.Ordinal), "alpha " + alpha);
+            var fresh = work.CodeSearch("worktree-token");
+            Check(fresh.Contains("c.txt:", StringComparison.Ordinal) && !fresh.Contains("alpha-token", StringComparison.Ordinal), "fresh " + fresh);
+
+            var rev = at.CodeSearch("beta-token");
+            Check(rev.Contains("b.txt:", StringComparison.Ordinal) && !rev.Contains("worktree-token", StringComparison.Ordinal), "rev " + rev);
+            var missed = at.CodeSearch("worktree-token");
+            Check(missed == "No matches.", "missed " + missed);
+
+            work.ReportProgress("Reading the worktree");
+            at.ReportProgress("Searching the commit");
+        });
+
+        Assert.Empty(errors);
+
+        using (CliCapture.Hold())
+            Assert.Equal(0, await SearchCommand.Invoke(["index", repo.Path, "--quiet"]));
+        repo.Write("d.txt", "alpha-token\n");
+
+        Parallel.For(0, 8, _ =>
+        {
+            var indexed = work.CodeSearch("alpha-token");
+            Check(indexed.Contains("a.txt:", StringComparison.Ordinal) && !indexed.Contains("d.txt", StringComparison.Ordinal), "indexed " + indexed);
+            var missed = work.CodeSearch("not-in-the-tree");
+            Check(missed == "No matches.", "indexed miss " + missed);
+        });
+
+        Assert.Empty(errors);
+        var lines = progress.ToString()
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.NotEmpty(lines);
+        foreach (var line in lines)
+        {
+            Assert.StartsWith("▶ ", line, StringComparison.Ordinal);
+            Assert.Equal(1, line.Split("▶ ", StringSplitOptions.None).Length - 1);
+        }
+    }
+
     private sealed class TempRepo : IDisposable
     {
         public string Path { get; } = System.IO.Path.Combine(

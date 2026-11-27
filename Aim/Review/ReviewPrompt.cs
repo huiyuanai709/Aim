@@ -75,7 +75,7 @@ internal static class ReviewPrompt
 
         if (input.AgentTools)
         {
-            sb.AppendLine("You can call file_read and code_search to inspect the repository. Before each meaningful step, call report_progress with a half-sentence of plain language. Your final message must still be only the JSON array.");
+            sb.AppendLine("You can call file_read and code_search to inspect the repository. Send independent reads and searches in one turn; wait only when a later call needs an earlier result. Call report_progress with a half-sentence of plain language for a meaningful step. It can share that turn and does not need one of its own. Your final message must still be only the JSON array.");
         }
 
         if (!string.IsNullOrWhiteSpace(input.GroupLabel))
@@ -116,9 +116,10 @@ internal static class ReviewPrompt
         var sb = new StringBuilder();
         sb.AppendLine("You review a git diff for Aim. You may call file_read and code_search before you answer.");
         sb.AppendLine("file_read returns one repository file. code_search finds a fixed string: ngrep on a worktree review, git grep of the reviewed revision on a commit or range. Neither tool submits a comment.");
-        sb.AppendLine("Before you start a meaningful step (reading files, searching, loading a skill, or writing the final findings), call report_progress with a half-sentence of plain language. Match the language of the code, its comments, and the user context. Do not assume Chinese or English. report_progress only prints that status and does not submit a comment.");
+        sb.AppendLine("When you already know each path or query, send those independent file_read and code_search calls in one turn so they run together. Wait for a result only when a later call depends on it.");
+        sb.AppendLine("Before a meaningful step (reading files, searching, loading a skill, or writing the final findings), call report_progress with a half-sentence of plain language. Match the language of the code, its comments, and the user context. Do not assume Chinese or English. report_progress only prints that status and does not submit a comment. Put that status in the same turn as the calls it describes. It does not need a turn of its own.");
         if (skills)
-            sb.AppendLine("Advertised skills can be loaded with load_skill, their files read with read_skill_resource, and their .py, .sh, .js, .cs, or .csx scripts run with run_skill_script.");
+            sb.AppendLine("Advertised skills can be loaded with load_skill, their files read with read_skill_resource, and their .py, .sh, .js, .cs, or .csx scripts run with run_skill_script. Independent load_skill, read_skill_resource, and run_skill_script calls can share that same turn when they do not need one another's results.");
         if (nameOnly)
             sb.AppendLine("The user message lists file names only. Use file_read to see contents, and stay focused on the files named in the diff.");
         sb.AppendLine("Your final message must be only the JSON array described in the user message. Do not wrap it in markdown. If nothing is worth reporting, return [].");
